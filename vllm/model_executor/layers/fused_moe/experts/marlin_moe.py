@@ -527,7 +527,6 @@ class MarlinExpertsBase(mk.FusedMoEExpertsModular):
             or quant_config.use_int8_w8a16
             or quant_config.use_fp8_w8a16
         ), "Supports only {mxfp,nvfp,int}4_w4a16, int8_w8a16 or fp8_w8a16"
-
         super().__init__(
             moe_config=moe_config,
             quant_config=quant_config,
@@ -743,6 +742,7 @@ class MarlinExperts(LoRAExpertsMixin, MarlinExpertsBase):
                 intermediate_cache13=workspace2,
                 intermediate_cache2=workspace13,
                 mul_topk_weights_in_gemm2=not hooked,
+                workspace=get_marlin_workspace(hidden_states.device),
             )
             return
 
@@ -850,6 +850,7 @@ class MarlinExperts(LoRAExpertsMixin, MarlinExpertsBase):
             output=output,
             intermediate_cache13=workspace2,
             intermediate_cache2=workspace13,
+            workspace=get_marlin_workspace(hidden_states.device),
         )
 
     def moe_sum(
@@ -973,4 +974,5 @@ class BatchedMarlinExperts(MarlinExpertsBase):
             w2_zeros=self.w2_zp,
             activation_func=activation_func,
             activation_config=self.activation_config,
+            workspace=get_marlin_workspace(hidden_states.device),
         )

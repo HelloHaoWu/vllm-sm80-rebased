@@ -3167,3 +3167,35 @@ def test_decode_chunk_budget_disabled_fitting_and_invalid():
         _decode_chunk_ranges(32, 1024, -1, 2)
     with pytest.raises(ValueError, match="16 logits rows"):
         _decode_chunk_ranges(32, 1024, 1024, 2)
+
+
+@pytest.mark.skipif(not current_platform.is_cuda(), reason="This test requires CUDA")
+@pytest.mark.parametrize("top_k", [512, 1024, 2048])
+@pytest.mark.parametrize("num_rows", [1, 8, 64])
+@pytest.mark.parametrize("backend", TOPK_BACKENDS)
+@torch.inference_mode()
+def test_topk_between_k_and_2k(backend: str, num_rows: int, top_k: int) -> None:
+    """Rows holding between k and 2k candidates.
+
+    The band is worth its own case because it is the only regime where the
+    kernels must select nearly every candidate: for DeepSeek-V4 (index_topk
+    512, compress_ratio 4) it is prompt length 2049-4096, which the seq-len
+    ranges of the other tests here step over. Reported as silently corrupt on
+    SM8x in vllm-project/vllm#50576.
+    """
+    set_random_seed(0)
+    torch.set_default_device("cuda:0")
+
+    stride = 8192
+    for length in (top_k + 11, top_k * 3 // 2, 2 * top_k - 3):
+        logits = torch.randn(num_rows, stride, dtype=torch.float32, device="cuda")
+        lengths = torch.full((num_rows,), length, dtype=torch.int32, device="cuda")
+        indices = torch.empty((num_rows, top_k), dtype=torch.int32, device="cuda")
+
+        _run_topk_backend(backend, logits, lengths, indices, top_k, stride)
+
+        row_starts = torch.zeros(num_rows, dtype=torch.int32, device="cuda")
+        row_ends = torch.full((num_rows,), length, dtype=torch.int32, device="cuda")
+        validate_topk_against_reference(
+            logits, indices, row_starts, row_ends, top_k, f"{backend} (n={length})"
+        )

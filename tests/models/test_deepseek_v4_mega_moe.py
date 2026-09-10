@@ -11,6 +11,7 @@ from vllm.model_executor.layers.fused_moe.deep_gemm_mega_moe import (
     DeepGemmMegaMoEExperts,
     MegaMoEActivation,
 )
+from vllm.model_executor.layers.fused_moe.prepare_megamoe import prepare_megamoe_inputs
 from vllm.model_executor.models.interfaces import (
     get_mixture_of_experts_model,
     is_mixture_of_experts,
@@ -26,6 +27,7 @@ from vllm.models.deepseek_v41.common.mm_preprocess import IMAGE_SENTINEL_BASE_ID
 from vllm.models.deepseek_v41.nvidia.model import DeepseekV4MoE as DeepseekV41MoE
 from vllm.platforms import current_platform
 from vllm.transformers_utils.configs.deepseek_v41 import DeepseekV41Config
+from vllm.utils.import_utils import has_deep_gemm
 from vllm.utils.torch_utils import set_default_torch_dtype
 
 pytestmark = pytest.mark.skipif(
@@ -408,3 +410,257 @@ def test_dspark_draft_registers_mixture_of_experts(
     assert len(draft.moe_layers) == draft.model.num_dspark_layers == 2
     assert draft.num_routed_experts == hf_config.n_routed_experts
     assert draft.num_redundant_experts == 4
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available(),
+    reason="DeepSeek V4 MegaMoE fused input staging requires CUDA.",
+)
+@pytest.mark.skipif(
+    not has_deep_gemm(),
+    reason="the reference per_token_cast_to_fp8 comes from deep_gemm, which "
+    "production itself treats as optional (is_deep_gemm_supported)",
+)
+def test_deepseek_v4_mega_moe_fused_input_staging_is_bitwise_exact():
+    from vllm.third_party.deep_gemm.utils import per_token_cast_to_fp8
+
+    device = torch.device("cuda")
+    num_tokens = 7
+    hidden_size = 256
+    top_k = 8
+
+    generator = torch.Generator(device=device)
+    generator.manual_seed(0)
+    hidden_states = (
+        torch.randn(
+            num_tokens,
+            hidden_size,
+            device=device,
+            dtype=torch.float32,
+            generator=generator,
+        )
+        * 17.0
+    ).to(torch.bfloat16)
+    hidden_states[0, :32] = 0
+    hidden_states[1, 32:64] = 1.0e-6
+    hidden_states[2, 64:96] = -1.0e-6
+
+    topk_ids = torch.randint(
+        0,
+        256,
+        (num_tokens, top_k),
+        device=device,
+        dtype=torch.int32,
+        generator=generator,
+    )
+    topk_weights = torch.randn(
+        num_tokens,
+        top_k,
+        device=device,
+        dtype=torch.float32,
+        generator=generator,
+    )
+
+    ref_x, ref_x_sf = per_token_cast_to_fp8(
+        hidden_states,
+        use_ue8m0=True,
+        gran_k=32,
+        use_packed_ue8m0=True,
+    )
+    ref_topk_idx = topk_ids.to(torch.int64)
+    ref_topk_weights = topk_weights.clone()
+
+    fused_x = torch.empty_like(ref_x)
+    fused_x_sf = torch.empty_like(ref_x_sf)
+    fused_topk_idx = torch.empty_like(ref_topk_idx)
+    fused_topk_weights = torch.empty_like(ref_topk_weights)
+
+    prepare_megamoe_inputs(
+        hidden_states,
+        topk_weights,
+        topk_ids,
+        fused_x,
+        fused_x_sf,
+        fused_topk_idx,
+        fused_topk_weights,
+    )
+    torch.accelerator.synchronize()
+
+    assert torch.equal(fused_x.view(torch.uint8), ref_x.view(torch.uint8))
+    assert torch.equal(fused_x_sf, ref_x_sf)
+    assert torch.equal(fused_topk_idx, ref_topk_idx)
+    assert torch.equal(
+        fused_topk_weights.view(torch.uint8),
+        ref_topk_weights.view(torch.uint8),
+    )
+
+
+@pytest.mark.parametrize("shared_block_m", [8, 32, 96, 128, 192])
+def test_deepseek_v4_mega_moe_stages_shared_scale_tma_layout(shared_block_m):
+    from vllm.third_party.deep_gemm.utils import per_token_cast_to_fp8
+
+    device = torch.device("cuda")
+    num_tokens = shared_block_m + 7
+    hidden_size = 256
+    top_k = 8
+    generator = torch.Generator(device=device)
+    generator.manual_seed(shared_block_m)
+    hidden_states = torch.randn(
+        num_tokens,
+        hidden_size,
+        device=device,
+        dtype=torch.bfloat16,
+        generator=generator,
+    )
+    topk_ids = torch.randint(
+        0,
+        256,
+        (num_tokens, top_k),
+        device=device,
+        dtype=torch.int32,
+        generator=generator,
+    )
+    topk_weights = torch.randn(
+        num_tokens,
+        top_k,
+        device=device,
+        dtype=torch.float32,
+        generator=generator,
+    )
+
+    ref_x, ref_x_sf = per_token_cast_to_fp8(
+        hidden_states,
+        use_ue8m0=True,
+        gran_k=32,
+        use_packed_ue8m0=True,
+    )
+    aligned_block_m = ((shared_block_m + 127) // 128) * 128
+    num_shared_rows = ((num_tokens + shared_block_m - 1) // shared_block_m) * (
+        aligned_block_m
+    )
+    ref_shared_x_sf = torch.zeros(
+        num_shared_rows,
+        hidden_size // 128,
+        dtype=torch.int32,
+        device=device,
+    )
+    for token_id in range(num_tokens):
+        m_in_block = token_id % shared_block_m
+        transposed_m = (
+            (m_in_block // 128) * 128 + (m_in_block % 32) * 4 + (m_in_block % 128) // 32
+        )
+        shared_row = token_id // shared_block_m * aligned_block_m + transposed_m
+        ref_shared_x_sf[shared_row].copy_(ref_x_sf[token_id])
+
+    fused_x = torch.empty_like(ref_x)
+    fused_x_sf = torch.empty_like(ref_x_sf)
+    fused_shared_storage = torch.full(
+        (hidden_size // 128, num_shared_rows),
+        -1,
+        dtype=torch.int32,
+        device=device,
+    )
+    fused_shared_x_sf = fused_shared_storage.t()
+    fused_topk_idx = torch.empty_like(topk_ids, dtype=torch.int64)
+    fused_topk_weights = torch.empty_like(topk_weights)
+
+    prepare_megamoe_inputs(
+        hidden_states,
+        topk_weights,
+        topk_ids,
+        fused_x,
+        fused_x_sf,
+        fused_topk_idx,
+        fused_topk_weights,
+        shared_x_sf=fused_shared_x_sf,
+        shared_block_m=shared_block_m,
+    )
+    torch.accelerator.synchronize()
+
+    populated = ref_shared_x_sf != 0
+    assert torch.equal(fused_x.view(torch.uint8), ref_x.view(torch.uint8))
+    assert torch.equal(fused_x_sf, ref_x_sf)
+    assert torch.equal(fused_shared_x_sf[populated], ref_shared_x_sf[populated])
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available(),
+    reason="DeepSeek V4 MegaMoE fused input staging requires CUDA.",
+)
+@pytest.mark.skipif(
+    not has_deep_gemm(),
+    reason="the reference per_token_cast_to_fp8 comes from deep_gemm, which "
+    "production itself treats as optional (is_deep_gemm_supported)",
+)
+def test_deepseek_v4_mega_moe_fused_input_staging_masks_padding():
+    from vllm.third_party.deep_gemm.utils import per_token_cast_to_fp8
+
+    device = torch.device("cuda")
+    num_tokens = 7
+    hidden_size = 256
+    top_k = 8
+
+    generator = torch.Generator(device=device)
+    generator.manual_seed(1)
+    hidden_states = torch.randn(
+        num_tokens,
+        hidden_size,
+        device=device,
+        dtype=torch.bfloat16,
+        generator=generator,
+    )
+    topk_ids = torch.randint(
+        0,
+        256,
+        (num_tokens, top_k),
+        device=device,
+        dtype=torch.int32,
+        generator=generator,
+    )
+    topk_weights = torch.randn(
+        num_tokens,
+        top_k,
+        device=device,
+        dtype=torch.float32,
+        generator=generator,
+    )
+    is_padding = torch.tensor(
+        [False, True, False, False, True, False, True],
+        device=device,
+    )
+
+    ref_x, ref_x_sf = per_token_cast_to_fp8(
+        hidden_states,
+        use_ue8m0=True,
+        gran_k=32,
+        use_packed_ue8m0=True,
+    )
+    ref_topk_idx = topk_ids.to(torch.int64)
+    ref_topk_idx[is_padding] = -1
+    ref_topk_weights = topk_weights.clone()
+    ref_topk_weights[is_padding] = 0.0
+
+    fused_x = torch.empty_like(ref_x)
+    fused_x_sf = torch.empty_like(ref_x_sf)
+    fused_topk_idx = torch.empty_like(ref_topk_idx)
+    fused_topk_weights = torch.empty_like(ref_topk_weights)
+
+    prepare_megamoe_inputs(
+        hidden_states,
+        topk_weights,
+        topk_ids,
+        fused_x,
+        fused_x_sf,
+        fused_topk_idx,
+        fused_topk_weights,
+        is_padding=is_padding,
+    )
+    torch.accelerator.synchronize()
+
+    assert torch.equal(fused_x.view(torch.uint8), ref_x.view(torch.uint8))
+    assert torch.equal(fused_x_sf, ref_x_sf)
+    assert torch.equal(fused_topk_idx, ref_topk_idx)
+    assert torch.equal(
+        fused_topk_weights.view(torch.uint8),
+        ref_topk_weights.view(torch.uint8),
+    )

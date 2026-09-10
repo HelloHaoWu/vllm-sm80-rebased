@@ -10,6 +10,10 @@ import vllm.envs as envs
 from vllm.config import get_current_vllm_config_or_none
 from vllm.logger import init_logger
 from vllm.model_executor.custom_op import PluggableLayer
+from vllm.model_executor.kernels.linear.gemv_triton import (
+    bf16_gemv,
+    should_use_triton_gemv,
+)
 from vllm.model_executor.layers.linear import (
     ReplicatedLinear,
     UnquantizedLinearMethod,
@@ -37,6 +41,7 @@ class GateLinear(ReplicatedLinear):
        M>=2048)
     6. cuBLAS bf16×bf16→fp32 (SM90+ + bf16 weight + fp32 out_dtype); gfx950
        routes low M through the tier 2 kernel
+    6.5. Triton bf16 GEMV (pre-SM90 CUDA, bf16 weight, small decode)
     7. F.linear via ReplicatedLinear (ultimate fallback)
 
     The `out_dtype` attribute is mutable and can be set after init
@@ -374,7 +379,20 @@ class GateLinear(ReplicatedLinear):
                 output = bf16x3_router_gemm(x, self.weight)
             return self._return(output)
 
-        # Tier 6: cuBLAS bf16→fp32
+        # Tier 3.5: one-launch Triton GEMV for pre-Hopper decode. Every tier
+        # above requires SM90+; below, cuBLAS splits K and reduces for these
+        # skinny shapes (two launches), while a CTA-per-row GEMV accumulates
+        # in fp32 and stores fp32 in one launch (7.5 -> 3.1 us at M=1,
+        # K=4096, E=256 on A100). M > MAX_GEMV_TOKENS falls through to cuBLAS.
+        if (
+            not self.allow_specialized_router_gemm
+            and self._router_gemm_no_bias
+            and self.weight.dtype == torch.bfloat16
+            and should_use_triton_gemv(x, self.weight)
+        ):
+            return self._return(bf16_gemv(x, self.weight, self.out_dtype))
+
+        # Tier 4: cuBLAS bf16→fp32
         if self.allow_cublas_router_gemm and x.dtype == torch.bfloat16:
             if self.is_gfx950:
                 output = torch.ops.vllm.fp32_router_gemm_dispatch(x, self.weight, False)

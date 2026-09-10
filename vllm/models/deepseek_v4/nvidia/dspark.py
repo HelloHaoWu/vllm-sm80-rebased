@@ -427,6 +427,23 @@ class DSparkDeepseekV4ForCausalLM(nn.Module, DeepseekV4MixtureOfExperts):
             self.lm_head, self.model.norm(hidden_states), skip_gather=True
         )
 
+    def compute_draft_logits_shard(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        # Same logits, this rank's vocab columns only (no gather). The norm is
+        # part of the head, so it stays on this side of the split.
+        return self.logits_processor.get_shard_logits(
+            self.lm_head, self.model.norm(hidden_states)
+        )
+
+    def select_draft_token_shard(
+        self, markov_embed: torch.Tensor, base_shard_logits: torch.Tensor
+    ) -> torch.Tensor:
+        return self.model.markov_head.select_top_tokens(
+            markov_embed, base_shard_logits, self.logits_processor
+        )
+
+    def markov_fusion_operands(self):
+        return self.model.markov_head.fusion_operands(self.logits_processor)
+
     def map_draft_to_target(self, draft_ids: torch.Tensor) -> torch.Tensor:
         return draft_ids  # full-vocab: draft ids are target ids
 

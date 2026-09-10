@@ -21,6 +21,8 @@ from vllm.config import (
 from vllm.distributed import (
     get_dcp_group,
     get_pcp_group,
+    get_tp_group,
+    tensor_model_parallel_all_reduce,
 )
 from vllm.forward_context import get_forward_context
 from vllm.logger import init_logger
@@ -54,6 +56,7 @@ from vllm.utils.deep_gemm import (
     fp8_fp4_paged_mqa_logits,
     get_paged_mqa_logits_metadata,
     has_deep_gemm,
+    is_deep_gemm_supported,
     mqa_logits_mx_inputs,
     mqa_logits_use_mx_scales,
 )
@@ -71,8 +74,13 @@ from vllm.v1.attention.backends.mla.indexer import (
     DeepSeekV32IndexerDecodeMetadata,
     DeepseekV32IndexerMetadata,
     dense_logits_rows,
+    indexer_decode_shard_rows,
 )
 from vllm.v1.attention.ops.common import pack_seq_triton, unpack_seq_triton
+from vllm.v1.attention.ops.mqa_logits_triton import (
+    fp8_mqa_logits_triton,
+    fp8_paged_mqa_logits_triton,
+)
 from vllm.v1.attention.ops.pcp import maybe_gather_indexer_k
 from vllm.v1.worker.workspace import current_workspace_manager
 
@@ -241,6 +249,55 @@ def dcp_gather_kv_rows(
     return torch.index_select(
         gathered, 0, deinterleave_idx, out=out_buf[: deinterleave_idx.shape[0]]
     )
+
+
+def _all_reduce_decode_topk(
+    topk_indices_buffer: torch.Tensor,
+    num_padded_tokens: int,
+    topk_tokens: int,
+    row_lo: int,
+    row_hi: int,
+    max_index: int,
+) -> torch.Tensor:
+    """Reassemble the decode top-k from every rank's owned rows, under capture.
+
+    A sum-all_reduce over a buffer each rank zeroes outside the rows it owns
+    carries exactly what an all-gather would: every other rank adds exact +0.0
+    to a row, and ``x + 0.0 == x`` for every float, so each row arrives
+    bit-identical to the value its owner computed. Unlike ``all_gatherv`` it
+    needs no per-rank sizes and takes the one-shot custom all-reduce, which is
+    what makes it affordable once per ratio-4 layer inside a full cudagraph.
+
+    The indices ride in float32 because custom all-reduce takes only
+    float32/float16/bfloat16 (`custom_all_reduce.cu`); every integer below
+    2**24 is exact there, against compressed KV positions under 2**16 at this
+    model's 256k context.
+
+    The owned rows are read back out of ``topk_indices_buffer`` rather than
+    from the top-k kernel's output tensor: the kernel scatters only the slots
+    it fills and leaves the rest at the -1 pre-fill, so the buffer, not the
+    kernel, holds the full row.
+
+    The clamp is a no-op on every real index -- each is -1 or a position below
+    ``max_index`` -- and bounds the one case that is not real:
+    ``CustomAllreduce.custom_all_reduce``'s non-capturing warm-up branch
+    returns ``torch.empty_like``, and these values are gathered as KV offsets.
+    That branch is why VLLM_LOCAL_ARGMAX_ALLREDUCE ships off by default;
+    clamping before the result is used as an index is what makes the DSpark
+    fused Markov step safe with the same exchange, and it is what makes this
+    one safe.
+    """
+    scattered = torch.zeros(
+        (num_padded_tokens, topk_tokens),
+        dtype=torch.float32,
+        device=topk_indices_buffer.device,
+    )
+    scattered[row_lo:row_hi] = topk_indices_buffer[row_lo:row_hi, :topk_tokens]
+    reduced = tensor_model_parallel_all_reduce(scattered)
+    topk_indices_buffer[:num_padded_tokens, :topk_tokens] = reduced.clamp_(
+        -1, max_index
+    )
+    return topk_indices_buffer[:num_padded_tokens, :topk_tokens]
 
 
 @triton.jit
@@ -790,6 +847,12 @@ def sparse_attn_indexer(
     # fill.
     if not skip_topk_buffer_clear:
         topk_indices_buffer[: hidden_states.shape[0]] = -1
+    # DeepGEMM availability is constant per process; check once for both branches.
+    use_deep_gemm = is_deep_gemm_supported()
+    if not use_deep_gemm:
+        assert not use_fp4_cache, (
+            "Triton sparse-MLA fallback does not support FP4 KV cache"
+        )
     if has_prefill:
         prefill_metadata = attn_metadata_narrowed.prefill
         assert prefill_metadata is not None
@@ -941,6 +1004,19 @@ def sparse_attn_indexer(
                         )
                         row_starts = cu_seqlen_ks[rows]
                         row_ends = cu_seqlen_ke[rows]
+                    elif not use_deep_gemm:
+                        if q_scale_slice is not None:
+                            raise NotImplementedError("SM80 indexer requires FP8 Q")
+                        logits = fp8_mqa_logits_triton(
+                            q_slice_cast[rows],
+                            (k_quant_cast, k_scale_cast),
+                            prefill_weights[tokens],
+                            cu_seqlen_ks[rows],
+                            cu_seqlen_ke[rows],
+                            clean_logits=False,
+                        )
+                        row_starts = cu_seqlen_ks[rows]
+                        row_ends = cu_seqlen_ke[rows]
                     else:
                         q_scale_rows, chunk_weights = mqa_logits_mx_inputs(
                             q_slice_cast[rows],
@@ -1025,6 +1101,22 @@ def sparse_attn_indexer(
             # Free this chunk's logits before the next chunk allocates its own.
             del logits
 
+            if chunk.shard_row_counts is not None:
+                # TP query-sharding: this rank filled only its own rows of the
+                # chunk. Reassemble the full chunk from every rank's rows.
+                # all_gatherv takes per-rank sizes, so the split need not be
+                # even and no padding row is ever created -- there is nothing
+                # written-but-unread that could carry a wrong index.
+                gathered = get_tp_group().all_gatherv(
+                    topk_indices, dim=0, sizes=chunk.shard_row_counts
+                )
+                # The builder recorded the pre-shard start, so this module
+                # never has to invert the partition arithmetic.
+                chunk_start = chunk.gather_token_start
+                topk_indices_buffer[
+                    chunk_start : chunk_start + gathered.shape[0], :topk_tokens
+                ] = gathered
+
     if has_decode:
         decode_metadata = attn_metadata_narrowed.decode
         assert decode_metadata is not None
@@ -1086,14 +1178,38 @@ def sparse_attn_indexer(
         batch_size = padded_q_quant_decode_tokens.shape[0]
         next_n = padded_q_quant_decode_tokens.shape[1]
         num_padded_tokens = batch_size * next_n
-        seq_lens = decode_metadata.seq_lens[:batch_size]
+        # TP query-sharding, decode half: compute only this rank's query groups
+        # and all-reduce the top-k back to the full buffer below. The builder
+        # partitioned this same `batch_size`, so nothing is re-partitioned here.
+        shard_bounds = decode_metadata.shard_bounds
+        group_lo, group_hi = shard_bounds or (0, batch_size)
+        assert 0 <= group_lo < group_hi <= batch_size
+        row_lo, row_hi = indexer_decode_shard_rows(shard_bounds, batch_size, next_n)
+        # Log both outcomes once: a null A/B arm is otherwise indistinguishable
+        # from a shard that never engaged (canon; same as the prefill half).
+        if shard_bounds is not None:
+            logger.info_once(
+                "Indexer decode-sharding ENGAGED: each rank computes its own "
+                "slice of the decode query groups; top-k all-reduced per layer."
+            )
+        else:
+            logger.info_once(
+                "Indexer decode-sharding INACTIVE for this batch shape "
+                "(below VLLM_INDEXER_DECODE_SHARD_MIN_REQS, or ineligible)."
+            )
+        seq_lens = decode_metadata.seq_lens[group_lo:group_hi]
+        block_table = decode_metadata.block_table[group_lo:group_hi]
+        shard_weights = weights[row_lo:row_hi]
+        padded_q_scale = (
+            padded_q_scale[group_lo:group_hi] if padded_q_scale is not None else None
+        )
         # seq_lens is always 2D: (B, next_n) for native spec decode, (B, 1)
         # otherwise. deep_gemm fp8_fp4_paged_mqa_logits requires 2D context_lens;
         # the downstream topk kernels accept both 1D and 2D.
         padded_q_quant_cast = (
-            padded_q_quant_decode_tokens.view(torch.int8)
+            padded_q_quant_decode_tokens[group_lo:group_hi].view(torch.int8)
             if use_fp4_cache
-            else padded_q_quant_decode_tokens
+            else padded_q_quant_decode_tokens[group_lo:group_hi]
         )
         if chunk_decode:
             assert decode_metadata.indices is not None
@@ -1141,17 +1257,29 @@ def sparse_attn_indexer(
             logits = torch.ops.vllm.xpu_fp8_paged_mqa_logits(
                 padded_q_quant_cast,
                 kv_cache,
-                weights[:num_padded_tokens],
+                shard_weights,
                 seq_lens_xpu,
-                decode_metadata.block_table,
+                block_table,
                 decode_metadata.schedule_metadata,
                 max_model_len,
+            )
+        elif not use_deep_gemm:
+            if padded_q_scale is not None or decode_metadata.indices is not None:
+                raise NotImplementedError("SM80 indexer requires uniform FP8 decode")
+            logits = fp8_paged_mqa_logits_triton(
+                padded_q_quant_cast,
+                kv_cache,
+                shard_weights,
+                seq_lens,
+                block_table,
+                max_model_len=decode_metadata.max_seq_len,
+                clean_logits=False,
             )
         else:
             padded_q_scale, decode_weights = mqa_logits_mx_inputs(
                 padded_q_quant_cast,
                 padded_q_scale,
-                weights[:num_padded_tokens],
+                shard_weights,
                 logits_dtype,
             )
             logits = fp8_fp4_paged_mqa_logits(
@@ -1159,7 +1287,7 @@ def sparse_attn_indexer(
                 kv_cache,
                 decode_weights,
                 seq_lens,
-                decode_metadata.block_table,
+                block_table,
                 decode_metadata.schedule_metadata,
                 max_model_len=max_model_len,
                 logits_dtype=logits_dtype,
@@ -1205,7 +1333,7 @@ def sparse_attn_indexer(
                     candidate_block_size,
                     row_repeat,
                 )
-        topk_indices = topk_indices_buffer[:num_padded_tokens, :topk_tokens]
+        topk_indices = topk_indices_buffer[row_lo:row_hi, :topk_tokens]
 
         # The backend comes from the layer (config is only readable at model
         # construction); dispatchers are cached per backend.
@@ -1229,6 +1357,16 @@ def sparse_attn_indexer(
                 logits_dtype=logits_dtype,
                 num_positions=max_model_len,
                 direct_max_rows=dcp_direct_topk_max_rows,
+            )
+
+        if shard_bounds is not None:
+            topk_indices = _all_reduce_decode_topk(
+                topk_indices_buffer,
+                num_padded_tokens,
+                topk_tokens,
+                row_lo,
+                row_hi,
+                decode_metadata.max_seq_len,
             )
 
         if needs_padded_path:
@@ -1319,6 +1457,7 @@ class SparseAttnIndexer(CustomOp):
         candidate_write: bool = False,
         cache_layout: str | None = None,
         skip_topk_buffer_clear: bool = False,
+        num_heads: int | None = None,
     ):
         super().__init__()
         self.k_cache = k_cache
@@ -1379,11 +1518,48 @@ class SparseAttnIndexer(CustomOp):
             )
             if workspace is not None:
                 self.dcp_direct_topk_max_rows = max_rows
-        if current_platform.is_cuda() and not has_deep_gemm():
+        if (
+            current_platform.is_cuda()
+            and is_deep_gemm_supported()
+            and not has_deep_gemm()
+        ):
             raise RuntimeError(
                 "Sparse Attention Indexer CUDA op requires DeepGEMM support in "
                 "the current vLLM environment."
             )
+        if current_platform.is_cuda() and not is_deep_gemm_supported():
+            logger.warning_once("DeepGEMM unavailable; using the Triton indexer.")
+            # Prime the autotune caches (and, as a side effect of the first
+            # launch, the e4m3 decode LUT) here rather than in a warmup hook:
+            # memory profiling captures cudagraphs before any hook runs, and
+            # the autotuner's synchronizing benchmark is illegal under
+            # capture.
+            from vllm.v1.attention.ops.mqa_logits_triton import (
+                warmup_fp8_mqa_logits_triton,
+                warmup_fp8_paged_mqa_logits_triton,
+            )
+
+            if num_heads is None:
+                logger.warning_once(
+                    "SparseAttnIndexer built without num_heads; skipping the "
+                    "Triton indexer autotune priming (first launch must not "
+                    "happen under cudagraph capture)."
+                )
+            elif not use_fp4_cache:
+                device = topk_indices_buffer.device
+                warmup_fp8_mqa_logits_triton(num_heads, head_dim, device)
+                # 64/256 are the V3.2 and V4 indexer kernel block sizes; the
+                # configured cache block size covers user-chosen values, which
+                # the backends accept as any MultipleOf(64).
+                block_sizes = {
+                    64,
+                    256,
+                    get_current_vllm_config().cache_config.block_size,
+                }
+                for kernel_block_size in sorted(block_sizes):
+                    warmup_fp8_paged_mqa_logits_triton(
+                        num_heads, head_dim, kernel_block_size, device
+                    )
 
         if vllm_config.kernel_config.enable_jit_warmup:
             from vllm.v1.attention.ops.common import (
