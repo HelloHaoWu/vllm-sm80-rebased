@@ -38,9 +38,14 @@ from vllm.models.glm5next.common.sparse_indexer import (
 from vllm.models.glm5next.nvidia.ops import kpool_compress as kpool_ops
 from vllm.platforms import current_platform
 from vllm.utils.deep_gemm import (
-    fp8_fp4_mqa_logits,
-    fp8_fp4_paged_mqa_logits,
+    fp8_fp4_mqa_logits as native_fp8_fp4_mqa_logits,
+)
+from vllm.utils.deep_gemm import (
+    fp8_fp4_paged_mqa_logits as native_fp8_fp4_paged_mqa_logits,
+)
+from vllm.utils.deep_gemm import (
     has_deep_gemm,
+    is_deep_gemm_supported,
     mqa_logits_mx_inputs,
     mqa_logits_use_mx_scales,
 )
@@ -65,6 +70,63 @@ logger = init_logger(__name__)
 # The specialized decode's kpool stage (specialized_decode/kpool.py), when
 # installed: CuTe kernels for the decode kernels below inside planned steps.
 SPECIALIZED_KPOOL: Any = None
+
+
+def fp8_fp4_mqa_logits(
+    q, k, weights, starts, ends, max_seq_len=None, *, logits_dtype=torch.float32
+):
+    if is_deep_gemm_supported():
+        return native_fp8_fp4_mqa_logits(
+            q, k, weights, starts, ends, max_seq_len, logits_dtype=logits_dtype
+        )
+    from vllm.v1.attention.ops.mqa_logits_triton import fp8_mqa_logits_triton
+
+    if q[1] is not None or q[0].dtype != torch.float8_e4m3fn:
+        raise RuntimeError("SM80 indexer fallback supports FP8 caches only")
+    if logits_dtype != torch.float32:
+        raise RuntimeError("SM80 indexer fallback currently requires FP32 logits")
+    return fp8_mqa_logits_triton(q[0], k, weights, starts, ends, clean_logits=False)
+
+
+def fp8_fp4_paged_mqa_logits(
+    q,
+    kv_cache,
+    weights,
+    seq_lens,
+    block_table,
+    schedule_metadata,
+    *,
+    max_model_len,
+    logits_dtype=torch.float32,
+    indices=None,
+):
+    if is_deep_gemm_supported():
+        return native_fp8_fp4_paged_mqa_logits(
+            q,
+            kv_cache,
+            weights,
+            seq_lens,
+            block_table,
+            schedule_metadata,
+            max_model_len=max_model_len,
+            logits_dtype=logits_dtype,
+            indices=indices,
+        )
+    from vllm.v1.attention.ops.mqa_logits_triton import fp8_paged_mqa_logits_triton
+
+    if q[1] is not None or q[0].dtype != torch.float8_e4m3fn or indices is not None:
+        raise RuntimeError("SM80 indexer fallback requires uniform FP8 decode")
+    if logits_dtype != torch.float32:
+        raise RuntimeError("SM80 indexer fallback currently requires FP32 logits")
+    return fp8_paged_mqa_logits_triton(
+        q[0],
+        kv_cache,
+        weights,
+        seq_lens,
+        block_table,
+        max_model_len=max_model_len,
+        clean_logits=False,
+    )
 
 
 # kpool write helper: form pools from the current token batch and compress them
@@ -158,7 +220,7 @@ def sparse_attn_indexer_kpool(
     fp8_dtype = current_platform.fp8_dtype()
     k_cache_prefix = _resolve_layer_name(k_cache_prefix)
 
-    fused_mqa_topk = use_fused_mqa_topk(
+    fused_mqa_topk = is_deep_gemm_supported() and use_fused_mqa_topk(
         query_shape=q_quant.shape[1:],
         topk=topk_tokens // max(index_kpool, 1),
         fp4_cache=use_fp4_cache,
@@ -836,9 +898,19 @@ class SparseAttnIndexerKpool(CustomOp):
         self.topk_indices_buffer = topk_indices_buffer
         self.skip_k_cache_insert = skip_k_cache_insert
         self.use_fp4_cache = use_fp4_cache
-        if current_platform.is_cuda() and not has_deep_gemm():
+        if (
+            current_platform.is_cuda()
+            and current_platform.support_deep_gemm()
+            and not has_deep_gemm()
+        ):
             raise RuntimeError(
                 "Sparse Attention Indexer CUDA op requires DeepGEMM to be installed."
+            )
+        if current_platform.is_cuda() and not is_deep_gemm_supported():
+            if use_fp4_cache:
+                raise RuntimeError("FP4 indexer cache requires native DeepGEMM support")
+            logger.info_once(
+                "GLM KPool indexer: using SM80-compatible Triton FP8 fallback"
             )
         _cfg = get_current_vllm_config_or_none()
         self.topk_backend = (
