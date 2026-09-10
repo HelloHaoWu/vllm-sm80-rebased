@@ -208,6 +208,7 @@ class AutoRegressiveSpeculator(DraftModelSpeculator):
             else None
         )
 
+        self._fence_draft_inputs()
         self.on_multi_step_decode_begin(num_reqs)
         multi_step_decode_fn = (
             self._run_fused_multi_step_decode
@@ -222,7 +223,12 @@ class AutoRegressiveSpeculator(DraftModelSpeculator):
             seq_lens_cpu_upper_bound,
             num_speculative_steps,
         )
+        self._fence_draft_inputs()
         self.on_multi_step_decode_end(num_reqs)
+
+    def _fence_draft_inputs(self) -> None:
+        if not torch.cuda.is_current_stream_capturing():
+            torch.accelerator.current_stream().synchronize()
 
     def _multi_step_decode(
         self,

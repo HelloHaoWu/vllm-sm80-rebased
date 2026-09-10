@@ -41,7 +41,7 @@ class CPUKVBlockZeroer(KVBlockZeroer):
         runner_only_attn_layers: set[str] | None = None,
     ) -> None:
         self.device = device
-        self._cache_views: list[tuple[torch.Tensor, int]] = []
+        self._cache_views: dict[int, list[tuple[torch.Tensor, int]]] = {}
 
         if runner_only_attn_layers is None:
             runner_only_attn_layers = set()
@@ -69,20 +69,27 @@ class CPUKVBlockZeroer(KVBlockZeroer):
                     f"{layer_name}: {kv_cache.shape[0]} kernel blocks is not a "
                     f"multiple of {num_blocks} logical blocks"
                 )
-                self._cache_views.append((kv_cache, kv_cache.shape[0] // num_blocks))
+                self._cache_views.setdefault(group.kv_cache_group_id, []).append(
+                    (kv_cache, kv_cache.shape[0] // num_blocks)
+                )
 
-    def zero_block_ids(self, block_ids: list[int]) -> None:
-        if not block_ids or not self._cache_views:
-            return
+    def zero_block_ids(self, block_ids_per_group: list[list[int]]) -> None:
+        for group_id, block_ids in enumerate(block_ids_per_group):
+            views = self._cache_views.get(group_id)
+            if not block_ids or not views:
+                continue
+            logical_block_ids = torch.tensor(block_ids, dtype=torch.int64)
+            indices_by_ratio = {1: logical_block_ids}
+            for kv_cache, blocks_per_logical_block in views:
+                kernel_block_ids = indices_by_ratio.get(blocks_per_logical_block)
+                if kernel_block_ids is None:
+                    offsets = torch.arange(blocks_per_logical_block, dtype=torch.int64)
+                    kernel_block_ids = (
+                        logical_block_ids[:, None] * blocks_per_logical_block + offsets
+                    ).flatten()
+                    indices_by_ratio[blocks_per_logical_block] = kernel_block_ids
+                kv_cache[kernel_block_ids] = 0
 
-        logical_block_ids = torch.tensor(block_ids, dtype=torch.int64)
-        indices_by_ratio = {1: logical_block_ids}
-        for kv_cache, blocks_per_logical_block in self._cache_views:
-            kernel_block_ids = indices_by_ratio.get(blocks_per_logical_block)
-            if kernel_block_ids is None:
-                offsets = torch.arange(blocks_per_logical_block, dtype=torch.int64)
-                kernel_block_ids = (
-                    logical_block_ids[:, None] * blocks_per_logical_block + offsets
-                ).flatten()
-                indices_by_ratio[blocks_per_logical_block] = kernel_block_ids
-            kv_cache[kernel_block_ids] = 0
+    def warmup(self, num_kv_blocks: int) -> None:
+        if num_kv_blocks > 0:
+            self.zero_block_ids([[0]] * (max(self._cache_views, default=-1) + 1))

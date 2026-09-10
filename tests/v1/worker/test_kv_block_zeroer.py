@@ -12,7 +12,6 @@ from vllm.platforms import current_platform
 from vllm.v1.kv_cache_interface import (
     AttentionSpec,
     KVCacheLayout,
-    SlidingWindowSpec,
 )
 from vllm.v1.worker import utils as worker_utils
 from vllm.v1.worker.utils import (
@@ -248,12 +247,11 @@ def test_virtual_block_split_zeroes_every_sub_block():
     # Two kernel blocks per logical block, interleaved with a neighbor view
     # (column 1) that must survive.
     pool = torch.ones((num_blocks * 2, 2, page), dtype=torch.int32, device=device)
-    spec = SlidingWindowSpec(
+    spec = AttentionSpec(
         block_size=2,
         num_kv_heads=1,
         head_size=1,
         dtype=torch.int32,
-        sliding_window=2,
     )
     zeroer = KVBlockZeroer(
         device,

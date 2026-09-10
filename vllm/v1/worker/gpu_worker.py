@@ -458,6 +458,21 @@ class Worker(WorkerBase):
 
     @instrument(span_name="Init device")
     def init_device(self):
+        # Give every worker process its own Triton JIT cache. By default all
+        # local ranks share one cache directory; concurrent compile+load of
+        # the same freshly-written kernel across ranks can read a partially
+        # written cubin (observed as a probabilistic warmup crash: illegal
+        # memory access surfacing at load_binary / the first launch of a
+        # just-compiled kernel, which disappears under CUDA_LAUNCH_BLOCKING's
+        # serialization). A few seconds of duplicate JIT per rank buys
+        # deterministic boots.
+        triton_cache_root = os.environ.get("TRITON_CACHE_DIR") or os.path.join(
+            os.path.expanduser("~"), ".triton", "cache"
+        )
+        os.environ["TRITON_CACHE_DIR"] = os.path.join(
+            triton_cache_root, f"rank_{self.rank}"
+        )
+
         if self.device_config.device_type == "cuda":
             # This env var set by Ray causes exceptions with graph building.
             os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
@@ -1083,6 +1098,22 @@ class Worker(WorkerBase):
                 randomize_inputs=self.randomize_dummy_inputs,
             )
         self.model_runner.maybe_remove_all_loras(self.model_runner.lora_config)
+
+        # Prime the unbatched pipeline-parallel NCCL communicators before any
+        # warmup step that may open a CUDA graph capture. ProcessGroupNCCL
+        # creates the 2-rank send/recv communicator lazily on first use; when
+        # that first use lands inside an open capture window (kernel warmup
+        # and capture_model both drive decode steps under FULL cudagraph
+        # modes), communicator initialization invalidates the capture and the
+        # engine later dies on an async cudaErrorInvalidValue far from here.
+        pp_group = get_pp_group()
+        if pp_group.world_size > 1:
+            primer = torch.zeros(1, dtype=torch.int32, device=self.device)
+            if not pp_group.is_first_rank:
+                pp_group.recv(primer.shape, primer.dtype)
+            if not pp_group.is_last_rank:
+                pp_group.send(primer)
+            torch.accelerator.synchronize()
 
         # Warmup and tune the kernels used during model execution before
         # cuda graph capture.
