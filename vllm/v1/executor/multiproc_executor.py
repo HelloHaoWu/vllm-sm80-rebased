@@ -520,39 +520,40 @@ class MultiprocExecutor(Executor):
             response_mqs = (response_mqs[output_rank],)
 
         def get_response():
-            responses = []
+            responses: list[Any] = [None] * len(response_mqs)
             has_failure = False
-
-            for mq in response_mqs:
-                dequeue_timeout = (
-                    None if deadline is None else max(0.0, deadline - time.monotonic())
-                )
-                try:
-                    status, result = mq.dequeue(timeout=dequeue_timeout)
-                except TimeoutError as e:
-                    raise TimeoutError(f"RPC call to {method} timed out.") from e
-
-                if status == WorkerProc.ResponseStatus.FAILURE_WITH_KV_OUTPUT:
-                    if (
-                        not self.vllm_config.parallel_config.enable_fault_tolerance
-                        or self.is_failed
-                    ):
-                        raise RuntimeError("Worker failed with KV connector output")
-                    has_failure = True
-                    assert isinstance(result, KVConnectorOutput)
-                    responses.append(result)
-                elif status != WorkerProc.ResponseStatus.SUCCESS:
-                    if (
-                        not self.vllm_config.parallel_config.enable_fault_tolerance
-                        or self.is_failed
-                    ):
-                        raise RuntimeError(
-                            f"Worker failed with error '{result}', please check the"
-                            " stack trace above for the root cause"
-                        )
-                    has_failure = True
-                else:
-                    responses.append(result)
+            pending = dict(enumerate(response_mqs))
+            while pending and not has_failure:
+                for idx, mq in list(pending.items()):
+                    slice_timeout = 1.0
+                    if deadline is not None:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            raise TimeoutError(f"RPC call to {method} timed out.")
+                        slice_timeout = min(slice_timeout, remaining)
+                    try:
+                        status, result = mq.dequeue(timeout=slice_timeout)
+                    except TimeoutError:
+                        continue
+                    if status != WorkerProc.ResponseStatus.SUCCESS:
+                        if (
+                            not self.vllm_config.parallel_config.enable_fault_tolerance
+                            or self.is_failed
+                        ):
+                            raise RuntimeError(
+                                f"Worker failed with error '{result}', please check "
+                                "the worker logs for the root cause"
+                            )
+                        has_failure = True
+                    responses[idx] = result
+                    del pending[idx]
+                    if has_failure:
+                        break
+                if pending and self.is_failed:
+                    raise RuntimeError(
+                        f"RPC call to {method} aborted: a worker process died "
+                        "before responding; check worker logs for the root cause"
+                    )
 
             if has_failure:
                 kv_connector_outputs: list[KVConnectorOutput | None] = []
