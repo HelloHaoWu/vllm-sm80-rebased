@@ -1308,7 +1308,7 @@ def sparse_attn_indexer(
             vis = seq_lens.reshape(-1)
             row_repeat = next_n if vis.numel() != num_rows else 1
             vis = vis[:num_rows]
-            decode_candidates = candidate_blocks[:num_rows]
+            decode_candidates = candidate_blocks[row_lo:row_hi]
             if candidate_write:
                 _select_candidate_blocks(
                     logits,

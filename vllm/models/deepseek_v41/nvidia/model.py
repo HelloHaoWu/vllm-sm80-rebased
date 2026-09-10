@@ -224,6 +224,14 @@ def _select_dsv4_attn_cls(vllm_config: VllmConfig) -> type[DeepseekV4Attention]:
             )
         return DeepseekV4FlashMLAAttention
     device_capability = current_platform.get_device_capability()
+    if device_capability is not None and device_capability.major == 8:
+        if backend not in (None, AttentionBackendEnum.TRITON_MLA_SPARSE_DSV41):
+            raise ValueError("DeepSeek V4.1 on SM8x requires TRITON_MLA_SPARSE_DSV41")
+        from vllm.models.deepseek_v41.ampere.ampere_sparse import (
+            DeepseekV41AmpereMLAAttention,
+        )
+
+        return DeepseekV41AmpereMLAAttention
     if backend in (
         AttentionBackendEnum.FLASHINFER_MLA_SPARSE,
         AttentionBackendEnum.FLASHINFER_MLA_SPARSE_SM120,

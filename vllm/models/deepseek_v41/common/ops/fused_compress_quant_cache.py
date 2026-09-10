@@ -7,6 +7,7 @@ import torch
 from vllm.models.deepseek_v4.common.ops.fused_indexer_q import _fp32x2_to_fp4x2
 from vllm.platforms import current_platform
 from vllm.triton_utils import tl, triton
+from vllm.v1.attention.ops.fp8_sm80 import _encode_fp8_u8
 
 if current_platform.is_rocm():
     from vllm.platforms.rocm import _ON_GFX950
@@ -402,8 +403,8 @@ def _rope_quant_insert_kernel(
     amax = tl.maximum(tl.max(tl.abs(quant), 1), 1e-4)
     exponent = tl.ceil(tl.log2(amax * (1.0 / 448.0)))
     scaled = quant * tl.reshape(tl.exp2(-exponent), (8, 1))
-    fp8 = tl.clamp(scaled, -448.0, 448.0).to(tl.float8e4nv)
-    packed = tl.reshape(fp8.to(tl.uint8, bitcast=True), (512,))
+    fp8 = _encode_fp8_u8(tl.clamp(scaled, -448.0, 448.0), False)
+    packed = tl.reshape(fp8, (512,))
     tl.store(values + d, packed, d < 448)
     s = tl.arange(0, 8)
     max_encoded: tl.constexpr = 254.0 if SANITIZE_CACHE_NANS else 255.0
@@ -469,8 +470,8 @@ def _rope_quant_insert_mxfp8_kernel(
     amax = tl.maximum(tl.max(tl.abs(quant), 1), 1e-4)
     exponent = tl.ceil(tl.log2(amax * (1.0 / 448.0)))
     scaled = quant * tl.reshape(tl.exp2(-exponent), (16, 1))
-    fp8 = tl.clamp(scaled, -448.0, 448.0).to(tl.float8e4nv)
-    tl.store(values + d, tl.reshape(fp8.to(tl.uint8, bitcast=True), (512,)))
+    fp8 = _encode_fp8_u8(tl.clamp(scaled, -448.0, 448.0), False)
+    tl.store(values + d, tl.reshape(fp8, (512,)))
 
     max_encoded: tl.constexpr = 254.0 if SANITIZE_CACHE_NANS else 255.0
     encoded = tl.minimum(tl.maximum(exponent + 127.0, 0.0), max_encoded)
@@ -570,6 +571,6 @@ def _rope_plain_insert_kernel(
     )
     if STORE_FP8:
         scaled = row.to(tl.float32) * (1.0 / tl.load(fp8_scale))
-        tl.store(dst + d, tl.clamp(scaled, -448.0, 448.0).to(tl.float8e4nv))
+        tl.store(dst + d, _encode_fp8_u8(tl.clamp(scaled, -448.0, 448.0), False))
     else:
         tl.store(dst + d, row)

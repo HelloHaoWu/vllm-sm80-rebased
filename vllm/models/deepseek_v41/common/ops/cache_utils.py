@@ -37,8 +37,9 @@ from vllm.models.deepseek_v4.common.ops.cache_utils import (
 from vllm.platforms import current_platform
 from vllm.transformers_utils.deepseek_v4_utils import get_compress_ratios
 from vllm.triton_utils import tl, triton
-from vllm.utils.import_utils import has_cutedsl
+from vllm.utils.import_utils import is_cutedsl_supported
 from vllm.utils.math_utils import cdiv, next_power_of_2
+from vllm.v1.attention.ops.fp8_sm80 import _decode_fp8_f32
 
 # Per-token byte width of the paged records; ``k_cache.shape[-1]`` -- the
 # width the KV-cache spec publishes -- identifies the record:
@@ -281,14 +282,7 @@ def _dequantize_and_gather_k_kernel(
                 # Load quantized fp8 values (stored as uint8)
                 x_uint8 = tl.load(token_fp8_ptr + offsets, mask=mask, other=0)
 
-                # Bitcast uint8 back to fp8 (FNUZ on gfx942, OCP elsewhere).
-                if use_fnuz:
-                    x_fp8 = x_uint8.to(tl.float8e4b8, bitcast=True)
-                else:
-                    x_fp8 = x_uint8.to(tl.float8e4nv, bitcast=True)
-
-                # Convert fp8 to float32 for computation
-                x_float = x_fp8.to(tl.float32)
+                x_float = _decode_fp8_f32(x_uint8, use_fnuz)
 
                 # Load and decode UE8M0 scale
                 # UE8M0: scale = 2^(stored_value - 127)
@@ -384,7 +378,7 @@ def _dequantize_and_gather_k_one_pass_kernel(
         if use_fnuz:
             x_fp8 = x_uint8.to(tl.float8e4b8, bitcast=True)
         else:
-            x_fp8 = x_uint8.to(tl.float8e4nv, bitcast=True)
+            x_fp8 = _decode_fp8_f32(x_uint8, False)
 
         encoded_scale = tl.load(token_scale_ptr + tl.arange(0, scale_dim))
         scale = tl.exp2(encoded_scale.to(tl.float32) - 127.0)  # UE8M0
@@ -453,7 +447,7 @@ def _dequantize_and_gather_k_mxfp8_kernel(
         if use_fnuz:
             x_fp8 = x_uint8.to(tl.float8e4b8, bitcast=True)
         else:
-            x_fp8 = x_uint8.to(tl.float8e4nv, bitcast=True)
+            x_fp8 = _decode_fp8_f32(x_uint8, False)
         tiles = tl.reshape(x_fp8.to(tl.float32), (scale_dim, quant_block))
 
         # UE8M0: scale = 2^(stored_value - 127).
@@ -693,7 +687,7 @@ def dequantize_and_gather_k_cache(
     `current_platform.is_fp8_fnuz()` for `swa_k_cache` (C++ encoder
     writes FNUZ on gfx942 and OCP on gfx950).
     """
-    if has_cutedsl() and k_cache.shape[-1] != V41_NVFP4_BYTES_PER_TOKEN:
+    if is_cutedsl_supported() and k_cache.shape[-1] != V41_NVFP4_BYTES_PER_TOKEN:
         # lazily import, otherwise some tests fail due to CUDA driver init failure.
         from vllm.models.deepseek_v4.nvidia.ops.dequant_gather_k_cutedsl import (
             _DEQUANT_GATHER_K_CACHE_CUTEDSL_KERNEL,
