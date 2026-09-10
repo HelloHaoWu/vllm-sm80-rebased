@@ -1070,6 +1070,9 @@ class OffloadingConnectorScheduler:
             )
 
         if num_external_tokens == 0:
+            req_status = self._req_status.get(request.request_id)
+            if req_status is not None:
+                self._release_reservation(req_status)
             return
 
         # prepare_load() below pins keys that get_num_new_matched_tokens()
@@ -1176,6 +1179,8 @@ class OffloadingConnectorScheduler:
             handler.on_load_scheduled(req_status, num_cached_tokens)
 
         src_spec = self.manager.prepare_load(keys_to_load, req_status.req_context)
+        # prepare_load holds its own pins now; drop the lookup-time reservation.
+        self._release_reservation(req_status)
         dst_spec = GPULoadStoreSpec(
             dst_block_ids, group_sizes=group_sizes, block_indices=block_indices
         )

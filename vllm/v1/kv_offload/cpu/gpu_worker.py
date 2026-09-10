@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 import functools
+import os
 import time
 from collections import deque
 from collections.abc import Iterator, Sequence
@@ -216,6 +217,11 @@ def pin_mmap_region(
     region: SharedOffloadRegion, worker_slot_only: bool = False
 ) -> None:
     """Register row-aligned chunks or this worker's slots, rolling back on failure."""
+    if not current_platform.is_cuda_alike():
+        return
+    if os.environ.get("VLLM_KV_OFFLOAD_SKIP_PIN") == "1":
+        logger.warning("VLLM_KV_OFFLOAD_SKIP_PIN=1: CPU offload memory is unpinned")
+        return
     rank = region.rank
     base_ptr = region._base.data_ptr()
     total_size = region.total_size_bytes
@@ -261,14 +267,17 @@ def pin_mmap_region(
             continue
         logger.warning(
             "host_register failed for rank=%d at %.2f of %.2f GB; "
-            "the offload region stays pageable",
+            "the offload registration is rolled back",
             rank,
             offset / 1e9,
             total_size / 1e9,
         )
         for registered in reversed(addresses):
             host_unregister(registered)
-        return
+        raise RuntimeError(
+            "CPU KV offload host registration failed; region was rolled back. "
+            "Check host memory pressure and shared region size."
+        )
 
     region.pinned_addresses.extend(addresses)
     region.is_pinned = True

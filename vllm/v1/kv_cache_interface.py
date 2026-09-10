@@ -856,6 +856,13 @@ class KVCacheConfig:
     """Resolved retention policy for local prefix-cache checkpoints."""
     kv_cache_layout: str | None = None
     """The KV cache layout resolved by the engine core, adopted by all workers."""
+    max_worker_kv_bytes_per_block: int = 0
+    """Maximum per-worker KV bytes per block across ALL workers, filled in by
+    the engine after per-worker configs are computed. With pipeline
+    parallelism the stages hold different layer sets, so their local values
+    differ; shared-memory KV offload layouts must size worker slots by this
+    global maximum to keep every process on one region geometry. 0 means
+    "unknown" and consumers fall back to their local value."""
     hash_block_size: int | None = None
     """Tokens per prefix-cache block hash, resolved by the engine core."""
     cache_hit_alignment_tokens: int | None = None

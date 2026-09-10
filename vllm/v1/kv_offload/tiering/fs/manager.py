@@ -14,6 +14,7 @@ File naming:  <base_path>_r<rank>/<hhh>/<hh>_g<group_idx>/<hash_hex>.bin
               (hash-based subdirectories to limit directory fan-out)
 """
 
+import contextlib
 import functools
 import json
 import os
@@ -49,6 +50,7 @@ from vllm.v1.kv_offload.tiering.base import (
     SecondaryTierManager,
     TransferJob,
 )
+from vllm.v1.kv_offload.tiering.fs.capacity import FsCapacityManager
 from vllm.v1.kv_offload.tiering.fs.io import (
     batch_load_block,
     batch_store_block,
@@ -117,6 +119,9 @@ class FileSystemTierManager(SecondaryTierManager):
         enable_kv_events: bool = False,
         locality: str | None = None,
         backpressure_detector: BackpressureDetector | None = None,
+        max_capacity_gb: float = 0,
+        evict_watermark: float = 0.9,
+        evict_protect_s: float = 120.0,
     ):
         """Args:
         offloading_spec: Contains normalized offloading configuration and
@@ -206,6 +211,31 @@ class FileSystemTierManager(SecondaryTierManager):
             thread_name_prefix="vllm_kv_py_fs",
         )
 
+        # LRU capacity management (fork feature): 0 disables (unbounded).
+        # When exceeded, least-recently-used chunk files are unlinked until
+        # usage drops below max_capacity_gb * evict_watermark. Files stored or
+        # touched within evict_protect_s seconds are exempt, protecting
+        # lookup-hit -> load races. Assumes one manager owns root_dir.
+        self._capacity: FsCapacityManager | None = None
+        self._capacity_job_paths: dict[JobId, list[str]] = {}
+        if max_capacity_gb > 0:
+            self._capacity = FsCapacityManager(
+                capacity_bytes=int(max_capacity_gb * 1e9),
+                watermark=evict_watermark,
+                protect_s=evict_protect_s,
+            )
+            # Chunk files live under the mapper's base dir; legacy layouts
+            # used sibling per-rank dirs (<base>_r<idx>) - scan both.
+            base_path = os.path.dirname(config_path)
+            parent = os.path.dirname(base_path) or "."
+            base_name = os.path.basename(base_path)
+            scan_dirs = [base_path] + [
+                os.path.join(parent, d)
+                for d in sorted(os.listdir(parent))
+                if d.startswith(base_name + "_r")
+            ]
+            self._capacity.scan(scan_dirs)
+
         self._lookup_manager = FsAsyncLookupManager(tier=self, tier_type=self.tier_type)
 
     @override
@@ -217,12 +247,18 @@ class FileSystemTierManager(SecondaryTierManager):
         result = self._lookup_manager.lookup(key, req_context)
         if result is None:
             return LookupResult.RETRY
+        if result and self._capacity is not None:
+            self._capacity.record_use(self.file_mapper.get_file_name(key))
         return LookupResult.HIT if result else LookupResult.MISS
 
     @override
     def submit_store(self, job_metadata: TransferJob) -> None:
         keys = list(job_metadata.keys)
         self._store_jobs[job_metadata.job_id] = job_metadata
+        if self._capacity is not None:
+            self._capacity_job_paths[job_metadata.job_id] = [
+                self.file_mapper.get_file_name(key) for key in keys
+            ]
         task = functools.partial(
             batch_store_block,
             [self.file_mapper.get_file_name(key) for key in keys],
@@ -280,6 +316,12 @@ class FileSystemTierManager(SecondaryTierManager):
         as a miss here (scheduler thread)."""
         results = []
         for job_id, success, transfer_time in self._pool.get_finished():
+            if self._capacity is not None:
+                cap_paths = self._capacity_job_paths.pop(job_id, None)
+                if success and cap_paths:
+                    for path in cap_paths:
+                        with contextlib.suppress(OSError):
+                            self._capacity.record_store(path, os.path.getsize(path))
             block_count = self._job_block_counts.pop(job_id, 0)
             transfer_bytes = block_count * self._block_size if block_count else None
             job = self._store_jobs.pop(job_id, None)
@@ -342,6 +384,10 @@ class FileSystemTierManager(SecondaryTierManager):
 
     @override
     def on_schedule_end(self, context: ScheduleEndContext) -> None:
+        if self._capacity is not None:
+            # Cheap no-op while under capacity; keeps usage converging toward
+            # the limit even when no store jobs are completing.
+            self._capacity.evict()
         self._lookup_manager.flush()
 
     @override

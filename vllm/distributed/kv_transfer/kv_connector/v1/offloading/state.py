@@ -368,6 +368,8 @@ class RequestOffloadState:
     load_key_ranges: list[tuple[int, int, OffloadKey]] = field(default_factory=list)
     # True once on_request_finished has been signaled to the manager.
     finished_signaled: bool = False
+    # Lookup hits held until prepare_load acquires its own references.
+    reserved_keys: list[OffloadKey] = field(default_factory=list)
     # A load for this request failed; all its later lookups, including after
     # preemption, skip the offloaded cache so a faulting load is not retried.
     load_failed: bool = False

@@ -408,6 +408,10 @@ class Scheduler(SchedulerInterface):
 
         self.has_mamba_layers = kv_cache_config.has_mamba_layers
         self.needs_kv_cache_zeroing = kv_cache_config.needs_kv_cache_zeroing
+        # Blocks that async KV loads will overwrite this step, skipped from
+        # zeroing since the zeroing could race the out-of-band write.
+        # Keyed by kv-cache group id: block ids are group-scoped.
+        self._skip_zero_block_ids: dict[int, set[int]] = {}
         self.need_mamba_block_aligned_split = (
             self.has_mamba_layers and self.cache_config.mamba_cache_mode == "align"
         )
@@ -1568,6 +1572,20 @@ class Scheduler(SchedulerInterface):
                     self._reserve_parked(request)
                     self._set_kv_fetch_stage(request, KV_FETCH_IN_PROGRESS)
                     skip_request(request_queue)
+                    if self.needs_kv_cache_zeroing:
+                        # Skip zeroing of the blocks the async load will
+                        # overwrite; the zeroing could race the write.
+                        mgr = self.kv_cache_manager
+                        per_group = mgr.get_zeroing_block_ids_in_range(
+                            request.request_id,
+                            num_new_local_computed_tokens,
+                            num_computed_tokens,
+                        )
+                        for group_id, ids in enumerate(per_group):
+                            if ids:
+                                self._skip_zero_block_ids.setdefault(
+                                    group_id, set()
+                                ).update(ids)
                     continue
 
                 request = request_queue.pop_request()
@@ -1797,13 +1815,24 @@ class Scheduler(SchedulerInterface):
     ) -> KVConnectorMetadata:
         return connector.build_connector_meta(scheduler_output)
 
-    def _get_new_block_ids_to_zero(self) -> list[int] | None:
+    def _get_new_block_ids_to_zero(self) -> list[list[int]] | None:
         # Drain new attention block ids every step so the manager-side list
         # does not grow unbounded; only kv-cache zeroing consumes them.
         new_block_ids_to_zero = self.kv_cache_manager.take_new_block_ids()
         if not self.needs_kv_cache_zeroing:
             return None
-        return new_block_ids_to_zero or None
+
+        if self._skip_zero_block_ids:
+            skip = self._skip_zero_block_ids
+            new_block_ids_to_zero = [
+                [b for b in ids if b not in skip.get(group_id, ())]
+                for group_id, ids in enumerate(new_block_ids_to_zero)
+            ]
+            skip.clear()
+
+        if not any(new_block_ids_to_zero):
+            return None
+        return new_block_ids_to_zero
 
     def _preempt_request(
         self, request: Request, timestamp: float, drop_stale_output: bool = False
@@ -3658,19 +3687,41 @@ class Scheduler(SchedulerInterface):
         # KV Connector:: update recv and send status from last step.
         for req_id in kv_connector_output.finished_recving or ():
             logger.debug("Finished recving KV transfer for request %s", req_id)
-            assert req_id in self.requests
-            req = self.requests[req_id]
+            req = self.requests.get(req_id)
+            if req is None:
+                # The request was already removed (e.g. aborted after a
+                # failed/late KV transfer). Drop the stale completion instead
+                # of crashing the engine.
+                logger.warning(
+                    "Finished recving KV transfer for request %s, but it is "
+                    "no longer tracked (likely aborted). Ignoring.",
+                    req_id,
+                )
+                continue
             if req.status == RequestStatus.WAITING_FOR_REMOTE_KVS:
                 self.finished_recving_kv_req_ids.add(req_id)
                 self._set_kv_fetch_stage(req, KV_FETCH_COMPLETED_WAITING)
-            else:
-                assert RequestStatus.is_finished(req.status)
+            elif RequestStatus.is_finished(req.status):
                 self._aborted_kv_loads.discard(req_id)
                 self._free_blocks(self.requests[req_id])
+            else:
+                logger.warning(
+                    "Finished recving KV transfer for request %s in "
+                    "unexpected status %s; ignoring.",
+                    req_id,
+                    req.status,
+                )
         for req_id in kv_connector_output.finished_sending or ():
             logger.debug("Finished sending KV transfer for request %s", req_id)
-            assert req_id in self.requests
-            self._free_blocks(self.requests[req_id])
+            req = self.requests.get(req_id)
+            if req is None:
+                logger.warning(
+                    "Finished sending KV transfer for request %s, but it is "
+                    "no longer tracked (likely aborted). Ignoring.",
+                    req_id,
+                )
+                continue
+            self._free_blocks(req)
 
     def _update_requests_with_invalid_blocks(
         self,
@@ -3726,6 +3777,7 @@ class Scheduler(SchedulerInterface):
             req_num_computed_blocks = (
                 req_num_computed_tokens + self.block_size - 1
             ) // self.block_size
+
             for idx, block_id in zip(range(req_num_computed_blocks), req_block_ids):
                 if block_id not in invalid_block_ids:
                     continue
