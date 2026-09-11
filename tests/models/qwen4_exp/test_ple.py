@@ -2832,3 +2832,68 @@ def test_amd_ngram_embedding_matches_reference_under_compile(
     )
     expected = loaded_weight[ngram_ids.cpu()].flatten(-2).to(device)
     torch.testing.assert_close(output.float(), expected.float(), rtol=0, atol=0)
+
+
+def _compressed_tensors_w4a16_config(
+    targets: list[str], ignore: list[str]
+) -> CompressedTensorsConfig:
+    return CompressedTensorsConfig.from_config(
+        {
+            "format": "pack-quantized",
+            "quant_method": "compressed-tensors",
+            "ignore": ignore,
+            "config_groups": {
+                "group_0": {
+                    "targets": targets,
+                    "weights": {
+                        "num_bits": 4,
+                        "type": "int",
+                        "symmetric": True,
+                        "strategy": "group",
+                        "group_size": 128,
+                    },
+                    "input_activations": None,
+                }
+            },
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "ignore",
+    [
+        ["lm_head", r"re:.*\.ple\..*"],
+        ["lm_head"],
+    ],
+)
+def test_ple_embedding_stays_unquantized_for_compressed_tensors_linear_targets(
+    ignore: list[str],
+) -> None:
+    prefix = "language_model.model.layers.1.ple.ple_embedding.ngram_embedding"
+    quant_config = _compressed_tensors_w4a16_config(["Linear"], ignore)
+
+    assert isinstance(
+        Qwen4ExpPLEEmbeddingMethod.from_quant_config(quant_config, prefix),
+        Qwen4ExpPLEUnquantizedEmbeddingMethod,
+    )
+
+
+def test_ple_embedding_rejects_compressed_tensors_targeting_the_table() -> None:
+    prefix = "language_model.model.layers.1.ple.ple_embedding.ngram_embedding"
+    quant_config = _compressed_tensors_w4a16_config(["Linear", "Embedding"], [])
+    with pytest.raises(NotImplementedError, match="compressed-tensors"):
+        Qwen4ExpPLEEmbeddingMethod.from_quant_config(quant_config, prefix)
+
+    quant_config = _compressed_tensors_w4a16_config(
+        ["Linear", r"re:.*ngram_embedding.*"], []
+    )
+    with pytest.raises(NotImplementedError, match="compressed-tensors"):
+        Qwen4ExpPLEEmbeddingMethod.from_quant_config(quant_config, prefix)
+
+    quant_config = _compressed_tensors_w4a16_config(
+        ["Linear", r"re:.*ngram_embedding.*"], [r"re:.*\.ple\..*"]
+    )
+    assert isinstance(
+        Qwen4ExpPLEEmbeddingMethod.from_quant_config(quant_config, prefix),
+        Qwen4ExpPLEUnquantizedEmbeddingMethod,
+    )

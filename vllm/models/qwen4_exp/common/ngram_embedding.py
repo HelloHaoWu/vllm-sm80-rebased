@@ -31,6 +31,10 @@ from vllm.model_executor.layers.quantization.base_config import (
 from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors import (  # noqa: E501
     CompressedTensorsConfig,
 )
+from vllm.model_executor.layers.quantization.compressed_tensors.utils import (
+    find_matched_target,
+    should_ignore_layer,
+)
 from vllm.model_executor.layers.quantization.fp8 import Fp8Config
 from vllm.model_executor.layers.quantization.inc import INCConfig
 from vllm.model_executor.layers.quantization.modelopt import (
@@ -180,6 +184,31 @@ class Qwen4ExpPLEEmbedding(PLEVocabParallelEmbedding, ABC):
         raise NotImplementedError
 
 
+def _compressed_tensors_quantizes_ple(
+    quant_config: CompressedTensorsConfig, prefix: str
+) -> bool:
+    """Whether a compressed-tensors config group explicitly targets the PLE table.
+
+    compressed-tensors exports (e.g. the AWQ W4A16 checkpoints) quantize
+    ``Linear``/``RoutedExperts`` targets only, so the embedding table stays in
+    the checkpoint dtype whether or not ``ignore`` lists it.
+    """
+    ignore = quant_config.ignore
+    fused_mapping = quant_config.packed_modules_mapping
+    if should_ignore_layer(
+        prefix, ignore=ignore, fused_mapping=fused_mapping
+    ) or should_ignore_layer(
+        f"{prefix}.shard_0", ignore=ignore, fused_mapping=fused_mapping
+    ):
+        return False
+    targets = list(quant_config.target_scheme_map)
+    module = nn.Embedding(1, 1)
+    return any(
+        find_matched_target(name, module, targets, fused_mapping) is not None
+        for name in (prefix, f"{prefix}.shard_0")
+    )
+
+
 class Qwen4ExpPLEEmbeddingMethod(QuantizeMethodBase):
     """Quantization interface shared by resident and pinned PLE tables."""
 
@@ -219,10 +248,12 @@ class Qwen4ExpPLEEmbeddingMethod(QuantizeMethodBase):
                         f"{prefix!r}; expected FP8 or NVFP4"
                     )
                 return Qwen4ExpPLEUnquantizedEmbeddingMethod()
-        if (
-            isinstance(quant_config, CompressedTensorsConfig)
-            and quant_config.get_scheme_dict(None, layer_name=prefix) is None
-        ):
+        if isinstance(quant_config, CompressedTensorsConfig):
+            if _compressed_tensors_quantizes_ple(quant_config, prefix):
+                raise NotImplementedError(
+                    f"Compressed-tensors quantization of PLE {prefix!r} is unsupported; "
+                    "leave the embedding unquantized."
+                )
             return Qwen4ExpPLEUnquantizedEmbeddingMethod()
         if (
             isinstance(quant_config, INCConfig)
