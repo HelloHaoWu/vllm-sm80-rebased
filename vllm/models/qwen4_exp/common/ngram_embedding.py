@@ -251,7 +251,7 @@ class Qwen4ExpPLEEmbeddingMethod(QuantizeMethodBase):
         if isinstance(quant_config, CompressedTensorsConfig):
             if _compressed_tensors_quantizes_ple(quant_config, prefix):
                 raise NotImplementedError(
-                    f"Compressed-tensors quantization of PLE {prefix!r} is unsupported; "
+                    f"Compressed-tensors PLE {prefix!r} is unsupported; "
                     "leave the embedding unquantized."
                 )
             return Qwen4ExpPLEUnquantizedEmbeddingMethod()
