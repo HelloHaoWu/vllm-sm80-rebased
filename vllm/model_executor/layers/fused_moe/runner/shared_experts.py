@@ -67,9 +67,6 @@ class SharedExperts(torch.nn.Module):
             lora_config is not None and lora_config.fully_sharded_loras
         )
 
-        # Might not be safe to run multi-stream mode if routed and shared experts
-        # alias the same inputs
-        self._is_multistream_safe = is_multistream_safe
         # ROCm launches shared experts before routed dispatch and syncs through
         # CUDA events (vllm#52033). On CUDA that launch does not overlap under
         # breakable CUDA graphs (the shared-expert kernels replay inline with

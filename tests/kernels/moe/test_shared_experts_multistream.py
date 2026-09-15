@@ -7,12 +7,11 @@ the routed experts) and produce the same output as the serial path; above the
 token threshold they stay serial on the main stream.
 """
 
-from types import SimpleNamespace
-
 import pytest
 import torch
 
 import vllm.envs as envs
+from tests.kernels.moe.utils import make_dummy_moe_config
 from vllm.model_executor.layers.fused_moe.runner.shared_experts import (
     SharedExperts,
     SharedExpertsOrder,
@@ -40,19 +39,11 @@ class _StreamRecordingMLP(torch.nn.Module):
 
 
 def _shared_experts(layer: torch.nn.Module) -> SharedExperts:
-    parallel = SimpleNamespace(
-        enable_eplb=False,
-        all2all_backend="allgather_reducescatter",
-        use_fi_nvl_two_sided_kernels=False,
-        dp_size=1,
-        tp_size=1,
-    )
     return SharedExperts(
         layer,
-        moe_config=SimpleNamespace(moe_parallel_config=parallel),
+        moe_config=make_dummy_moe_config(hidden_dim=HIDDEN, intermediate_size=HIDDEN),
         enable_dbo=False,
         mk_can_overlap_shared_experts=lambda: False,
-        is_multistream_safe=lambda: True,
     )
 
 
