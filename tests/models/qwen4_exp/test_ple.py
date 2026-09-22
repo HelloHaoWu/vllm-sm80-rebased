@@ -796,10 +796,8 @@ def test_ple_embedding_respects_inc_layer_config() -> None:
     )
 
     quant_config.extra_config = None
-    assert isinstance(
-        Qwen4ExpPLEEmbeddingMethod.from_quant_config(quant_config, prefix),
-        Qwen4ExpPLEUnquantizedEmbeddingMethod,
-    )
+    with pytest.raises(NotImplementedError, match="INC/auto-round"):
+        Qwen4ExpPLEEmbeddingMethod.from_quant_config(quant_config, prefix)
 
 
 def test_ple_embedding_is_unquantized_under_quark() -> None:
@@ -2897,3 +2895,31 @@ def test_ple_embedding_rejects_compressed_tensors_targeting_the_table() -> None:
         Qwen4ExpPLEEmbeddingMethod.from_quant_config(quant_config, prefix),
         Qwen4ExpPLEUnquantizedEmbeddingMethod,
     )
+
+
+def _auto_round_config(extra_config: dict) -> INCConfig:
+    return INCConfig.from_config(
+        {
+            "bits": 4,
+            "group_size": 128,
+            "sym": True,
+            "data_type": "int",
+            "quant_method": "auto-round",
+            "packing_format": "auto_round:auto_gptq",
+            "block_name_to_quantize": "model.layers",
+            "extra_config": extra_config,
+        }
+    )
+
+
+def test_ple_embedding_follows_auto_round_per_layer_overrides() -> None:
+    prefix = "model.layers.1.ple.ple_embedding.ngram_embedding"
+    kept_16bit = _auto_round_config({".*ple.*": {"bits": 16, "data_type": "float"}})
+    assert isinstance(
+        Qwen4ExpPLEEmbeddingMethod.from_quant_config(kept_16bit, prefix),
+        Qwen4ExpPLEUnquantizedEmbeddingMethod,
+    )
+
+    no_override = _auto_round_config({"model.layers.0.mlp.gate_proj": {"bits": 16}})
+    with pytest.raises(NotImplementedError, match="INC/auto-round"):
+        Qwen4ExpPLEEmbeddingMethod.from_quant_config(no_override, prefix)

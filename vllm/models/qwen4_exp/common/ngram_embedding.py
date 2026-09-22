@@ -209,6 +209,21 @@ def _compressed_tensors_quantizes_ple(
     )
 
 
+def _inc_quantizes_ple(quant_config: INCConfig, prefix: str) -> bool:
+    """Whether an INC/auto-round config leaves the PLE table quantized.
+
+    auto-round declares one global scheme plus per-layer overrides in
+    ``extra_config``, keyed by exact name or regex. Checkpoints that keep the
+    table readable list it there at 16 bits; ask the parser rather than
+    assuming either way.
+    """
+    table = nn.Embedding(1, 1)
+    return any(
+        quant_config.config_parser.resolve(table, name).quantized
+        for name in (prefix, f"{prefix}.shard_0")
+    )
+
+
 class Qwen4ExpPLEEmbeddingMethod(QuantizeMethodBase):
     """Quantization interface shared by resident and pinned PLE tables."""
 
@@ -255,10 +270,12 @@ class Qwen4ExpPLEEmbeddingMethod(QuantizeMethodBase):
                     "leave the embedding unquantized."
                 )
             return Qwen4ExpPLEUnquantizedEmbeddingMethod()
-        if (
-            isinstance(quant_config, INCConfig)
-            and not quant_config.config_parser.resolve(None, prefix).quantized
-        ):
+        if isinstance(quant_config, INCConfig):
+            if _inc_quantizes_ple(quant_config, prefix):
+                raise NotImplementedError(
+                    f"INC/auto-round quantization of PLE {prefix!r} is unsupported; "
+                    "keep the table at 16 bits in extra_config."
+                )
             return Qwen4ExpPLEUnquantizedEmbeddingMethod()
         # Quark quantizes only Linear and MoE layers; PLE tables stay BF16.
         if isinstance(quant_config, QuarkConfig):
