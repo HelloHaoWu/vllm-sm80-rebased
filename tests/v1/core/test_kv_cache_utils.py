@@ -2261,3 +2261,24 @@ def test_null_head_len():
         assert null_head_len(table) == expected
     blocks = KVCacheBlocks(([null] * 4 + real, [null] + real[:1] + [null]))
     assert blocks.get_unhashed_block_ids_all_groups() == [[1, 2, 3], [1]]
+
+
+def test_pp_worker_config_skips_group_owned_by_other_stage():
+    """Projection must not allocate another PP stage's heterogeneous layers."""
+    config = VllmConfig(model_config=ModelConfig(max_model_len=512))
+    config.cache_config.kv_cache_layout = "BLHNC"
+    spec_a = full_layer(new_kv_cache_spec())
+    spec_b = full_layer(new_kv_cache_spec(num_kv_heads=4))
+    groups = [
+        KVCacheGroup.from_layers({"stage0.a": spec_a, "stage0.b": spec_b}),
+        KVCacheGroup.from_layers({"stage1.c": spec_a, "stage1.d": spec_b}),
+    ]
+    local = {"stage1.c": spec_a, "stage1.d": spec_b}
+    projected = kv_cache_planning._project_kv_cache_groups_to_worker(groups, local)
+    assert projected[0].layer_names == []
+    assert projected[0].kv_cache_specs == {}
+    planned = kv_cache_planning.get_kv_cache_config_from_groups(
+        config, projected, available_memory=1 << 25
+    )
+    allocated = {name for tensor in planned.kv_cache_tensors for name in tensor.layers}
+    assert allocated == set(local)
