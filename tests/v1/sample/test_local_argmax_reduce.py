@@ -3,10 +3,10 @@
 """Vocab-parallel greedy selection must pick the token replication picks.
 
 Everything here runs on CPU with no process group: the collective in
-``LogitsProcessor.get_top_tokens`` is simulated by splitting a full-vocab row
-into shards and feeding the per-shard results to ``reduce_global_argmax``,
-which is where the correctness lives. ``get_shard_logits`` is exercised
-against a real ``ParallelLMHead`` built with a monkeypatched TP rank/size, so
+`LogitsProcessor.get_top_tokens` is simulated by splitting a full-vocab row
+into shards and feeding the per-shard results to `reduce_global_argmax`,
+which is where the correctness lives. `get_shard_logits` is exercised
+against a real `ParallelLMHead` built with a monkeypatched TP rank/size, so
 the shard geometry is the production one rather than one the test invented.
 """
 
@@ -98,7 +98,7 @@ def test_shard_order_does_not_matter(tp: int):
 def test_degenerate_rows_still_return_an_in_range_id(poison: float):
     """No row may select an id no shard owns.
 
-    A NaN row makes ``values == best`` false in every lane; a sentinel there
+    A NaN row makes `values == best` false in every lane; a sentinel there
     would travel into the caller's embedding lookup and surface as an async
     device-side assert (observed, on 8 ranks, before the reduction was made
     total). An all -inf row is the same shape of degeneracy from the other

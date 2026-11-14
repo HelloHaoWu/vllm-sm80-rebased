@@ -329,7 +329,9 @@ def test_send_and_recv_op_counts_match_with_speculator(monkeypatch):
 
     receiver = make_handler(monkeypatch, is_last_rank=False, num_speculative_steps=3)
     calls.clear()
-    assert receiver.receive(make_input_batch())
+    assert receiver.receive(
+        make_input_batch(), recv_drafts=receiver.num_speculative_steps > 0
+    )
     assert len(calls) == 3
     assert calls[0].shape == (3, sender.max_sample_len)
     assert calls[2].shape == (3, sender.num_speculative_steps)
@@ -345,9 +347,13 @@ def test_send_and_recv_op_counts_match_without_speculator(monkeypatch):
 
     receiver = make_handler(monkeypatch, is_last_rank=False, num_speculative_steps=0)
     calls.clear()
-    assert receiver.receive(make_input_batch())
+    assert receiver.receive(
+        make_input_batch(), recv_drafts=receiver.num_speculative_steps > 0
+    )
     assert len(calls) == 2
-    assert receiver.queue[-1].draft_tokens is None
+    slot = receiver.queue[-1]
+    assert slot is not None
+    assert slot.draft_tokens is None
 
 
 @requires_cuda
@@ -360,12 +366,12 @@ def test_both_ranks_skip_when_no_request_needs_sampling(monkeypatch):
 
     receiver = make_handler(monkeypatch, is_last_rank=False, num_speculative_steps=3)
     calls.clear()
-    assert not receiver.receive(make_input_batch(needs_sample=False))
+    assert not receiver.receive(make_input_batch(needs_sample=False), recv_drafts=True)
     assert calls == []
 
 
 @requires_cuda
-def test_relayed_draft_tokens_are_scattered_on_consume(monkeypatch):
+def test_relayed_draft_tokens_are_returned_on_consume(monkeypatch):
     """Non-last ranks verify against req_states.draft_tokens, which only the
     last rank can compute. The relayed drafts must land in that table when the
     deferred entry is consumed pp_size steps later, or the earlier stages verify
@@ -375,16 +381,20 @@ def test_relayed_draft_tokens_are_scattered_on_consume(monkeypatch):
     )
     record_broadcasts(monkeypatch, fill_value=7)
     input_batch = make_input_batch(num_reqs=2)
-    assert receiver.receive(input_batch)
+    assert receiver.receive(input_batch, recv_drafts=True)
 
-    draft_tokens = torch.zeros(8, 3, dtype=torch.int64, device="cuda")
-    # The queue is pre-seeded with pp_size placeholders: the first consume is
-    # a no-op, the second returns the entry pushed above.
-    assert receiver.get_prev_sampled_outputs(draft_tokens) is None
-    outputs = receiver.get_prev_sampled_outputs(draft_tokens)
-    torch.cuda.synchronize()
+    # The queue is pre-seeded with a PP placeholder. Current main returns
+    # drafts with their mapping; the caller's post-update scatters them.
+    assert receiver.get_prev_sampled_outputs() is None
+    outputs = receiver.get_prev_sampled_outputs()
+    torch.accelerator.synchronize()
 
     assert outputs is not None
-    assert (draft_tokens[:2] == 7).all()
-    assert (draft_tokens[2:] == 0).all()
-    assert (outputs["sampled_tokens"] == 7).all()
+    drafts = outputs["draft_tokens"]
+    sampled = outputs["sampled_tokens"]
+    mapping = outputs["idx_mapping"]
+    assert drafts is not None and sampled is not None and mapping is not None
+    assert drafts.shape == (2, 3)
+    assert (drafts == 7).all()
+    assert (sampled == 7).all()
+    assert mapping.tolist() == [0, 1]

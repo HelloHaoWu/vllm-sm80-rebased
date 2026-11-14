@@ -405,8 +405,16 @@ class OffloadingConnectorScheduler:
             if not pending:
                 del self._block_id_to_pending_jobs[bid]
 
+    def _release_reservation(self, req_status: RequestOffloadState) -> None:
+        if req_status.reserved_keys:
+            self.manager.release_reservation(
+                req_status.reserved_keys, req_status.req_context
+            )
+            req_status.reserved_keys = []
+
     def _remove_request(self, req_id: ReqId) -> None:
         """Remove the state of a request, and tell each store handler."""
+        self._release_reservation(self._req_status[req_id])
         del self._req_status[req_id]
         for handler in self._store_handlers.values():
             handler.on_request_removed(req_id)
@@ -980,6 +988,17 @@ class OffloadingConnectorScheduler:
             else:
                 self._maybe_observe_lookup_async_delay(req_status)
         req_status.update_num_hit_chunks(num_computed_tokens + (num_hit_tokens or 0))
+
+        self._release_reservation(req_status)
+        if num_hit_tokens:
+            reserve = [
+                key
+                for group_state in req_status.group_states
+                for key in group_state.offload_keys[: group_state.num_hit_chunks]
+            ]
+            req_status.reserved_keys = self.manager.reserve_hits(
+                reserve, req_status.req_context
+            )
 
         sync_load = self._reserve_sync_load(
             req_status, num_computed_tokens, num_hit_tokens
@@ -1616,6 +1635,9 @@ class OffloadingConnectorScheduler:
                 self.manager.on_new_request(req_context)
                 self.manager.on_request_finished(req_context)
             return False, None
+
+        with self._manager_locked():
+            self._release_reservation(req_status)
 
         self._maybe_observe_lookup_async_delay(req_status)
 

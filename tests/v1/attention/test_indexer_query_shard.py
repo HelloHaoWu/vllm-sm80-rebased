@@ -1,3 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
 """CPU tests for indexer query-sharding: the 2a partition, its skip_kv_gather
 rule, and the 2b Q-path row ranges that must compose with it.
 
@@ -54,6 +59,7 @@ def _chunk(
         cu_seq_lens=none,
         token_to_seq=none,
         total_seq_lens=token_end - token_start,
+        max_seqlen_k=token_end - token_start,
         token_start=token_start,
         token_end=token_end,
         num_reqs=1,
@@ -336,7 +342,7 @@ def test_gather_start_is_batch_absolute_for_every_request_group():
                 check(
                     chunk.gather_token_start
                     == base[(spec.req_slice.start, spec.req_slice.stop)]
-                    + spec.gather_start,
+                    + (spec.gather_start or 0),
                     f"tp={tp} rank={rank}: gather start must be group base + "
                     "pre-shard chunk start",
                 )

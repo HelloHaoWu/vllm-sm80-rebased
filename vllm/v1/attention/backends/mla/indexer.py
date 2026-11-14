@@ -233,7 +233,7 @@ MIN_SHARD_TOKENS = 2048
 class ShardedChunkSpec(NamedTuple):
     """One prefill sub-chunk after TP query-sharding.
 
-    ``shard_row_counts``/``gather_start`` travel with the slice they describe,
+    `shard_row_counts`/`gather_start` travel with the slice they describe,
     so the top-k all-gather can never pair sizes with the wrong chunk. They are
     None for sub-chunks left replicated; every rank emits the same chunk list
     either way, so the set of collectives is rank-uniform by construction.
@@ -251,7 +251,7 @@ class ShardedChunkSpec(NamedTuple):
 def shard_chunk_specs_by_query(
     chunk_specs: list[tuple[slice, slice]], tp_rank: int, tp_size: int
 ) -> list[ShardedChunkSpec]:
-    """Narrow each ``(req_slice, query_slice)`` to this rank's rows.
+    """Narrow each `(req_slice, query_slice)` to this rank's rows.
 
     Sub-chunks with fewer rows than ranks stay replicated (counts None)
     instead of leaving some ranks with an empty shard: dropping a chunk on
@@ -293,9 +293,9 @@ def shard_chunk_specs_by_query(
 
 
 def indexer_shard_size_for_batch(num_prefill_tokens: int, shard_size: int) -> int:
-    """``shard_size``, or 1 when this batch's prefill is too short to pay.
+    """`shard_size`, or 1 when this batch's prefill is too short to pay.
 
-    Below ``MIN_SHARD_TOKENS`` the per-chunk top-k all-gather costs more than
+    Below `MIN_SHARD_TOKENS` the per-chunk top-k all-gather costs more than
     the indexer work it removes. Derived from CPU metadata every rank holds
     identically: a rank-divergent answer here would desynchronise the
     collective, which hangs rather than misbehaves.
@@ -317,8 +317,8 @@ def indexer_decode_shard_rows(
 ) -> tuple[int, int]:
     """Batch-absolute top-k row range for this rank's decode query groups.
 
-    ``topk_indices_buffer`` is indexed by batch token, so query group ``g``
-    owns rows ``[g * next_n, (g + 1) * next_n)`` and this rank writes there
+    `topk_indices_buffer` is indexed by batch token, so query group `g`
+    owns rows `[g * next_n, (g + 1) * next_n)` and this rank writes there
     directly. Group-relative offsets are correct on rank 0 and silently
     misplace every later rank's indices -- the failure that cost a gsm8k point
     on the prefill half (canon rule 36).
@@ -336,16 +336,16 @@ def indexer_decode_shard_bounds(
 ) -> tuple[int, int] | None:
     """This rank's contiguous half-open slice of the decode query groups.
 
-    ``batch_size`` is the leading dimension the decode indexer kernels take:
-    one entry per request on the native path (each carrying ``next_n`` token
+    `batch_size` is the leading dimension the decode indexer kernels take:
+    one entry per request on the native path (each carrying `next_n` token
     rows) and one per token on the flattening path, which is what SM80 runs at
-    ``next_n = 6``. Either way the entries are the kernel's independent query
+    `next_n = 6`. Either way the entries are the kernel's independent query
     groups and each owns a contiguous block of top-k rows, so partitioning this
     dimension keeps every kernel call on a contiguous row range.
 
     None means "compute every group" -- the replicated path -- and is returned
-    when the shard is off (``shard_size == 1``, i.e. tp=1/DCP/PCP/flag off),
-    when the batch has fewer than ``min_reqs`` decode requests, or when there
+    when the shard is off (`shard_size == 1`, i.e. tp=1/DCP/PCP/flag off),
+    when the batch has fewer than `min_reqs` decode requests, or when there
     are fewer groups than ranks. The last case is what keeps every rank in the
     reduction: a rank owning no group would still have to enter the collective,
     and would launch the decode kernels over an empty row range to get there.
@@ -370,22 +370,22 @@ def indexer_q_row_ranges(
 
     The ranges are read back out of the chunk metadata rather than
     re-partitioned, so they are by construction exactly the rows the chunk loop
-    will read (``q_quant[chunk.token_start : chunk.token_end]``). The caller
-    keeps ``q_quant``/``weights`` full-size and leaves every other row unwritten,
+    will read (`q_quant[chunk.token_start : chunk.token_end]`). The caller
+    keeps `q_quant`/`weights` full-size and leaves every other row unwritten,
     so no downstream index changes meaning and there is no second partition to
     keep in step with this one.
 
     None means "compute every row" -- the replicated path -- and is returned
     whenever the rows that will be read are not covered by the chunks:
 
-    * ``num_decodes > 0``: the decode branch reads ``q_quant[:num_decode_tokens]``
-      and ``weights[:batch * next_n]``, ranges no chunk names (and the latter can
+    * `num_decodes > 0`: the decode branch reads `q_quant[:num_decode_tokens]`
+      and `weights[:batch * next_n]`, ranges no chunk names (and the latter can
       run past the decode region);
-    * no chunks, or ANY of them lacks ``shard_row_counts`` -- the whole batch
+    * no chunks, or ANY of them lacks `shard_row_counts` -- the whole batch
       replicated (tp=1, DCP, PCP, under MIN_SHARD_TOKENS) or a mixed batch
       where a sub-chunk with fewer rows than ranks stayed replicated; either
       way some chunk needs every row, so the Q path computes every row;
-    * a chunk naming a row beyond ``num_tokens``, which would silently truncate.
+    * a chunk naming a row beyond `num_tokens`, which would silently truncate.
     """
     if num_decodes > 0 or not chunks:
         return None

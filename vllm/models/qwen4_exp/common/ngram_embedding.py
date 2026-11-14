@@ -190,8 +190,8 @@ def _compressed_tensors_quantizes_ple(
     """Whether a compressed-tensors config group explicitly targets the PLE table.
 
     compressed-tensors exports (e.g. the AWQ W4A16 checkpoints) quantize
-    ``Linear``/``RoutedExperts`` targets only, so the embedding table stays in
-    the checkpoint dtype whether or not ``ignore`` lists it.
+    `Linear`/`RoutedExperts` targets only, so the embedding table stays in
+    the checkpoint dtype whether or not `ignore` lists it.
     """
     ignore = quant_config.ignore
     fused_mapping = quant_config.packed_modules_mapping
@@ -213,7 +213,7 @@ def _inc_quantizes_ple(quant_config: INCConfig, prefix: str) -> bool:
     """Whether an INC/auto-round config leaves the PLE table quantized.
 
     auto-round declares one global scheme plus per-layer overrides in
-    ``extra_config``, keyed by exact name or regex. Checkpoints that keep the
+    `extra_config`, keyed by exact name or regex. Checkpoints that keep the
     table readable list it there at 16 bits; ask the parser rather than
     assuming either way.
     """

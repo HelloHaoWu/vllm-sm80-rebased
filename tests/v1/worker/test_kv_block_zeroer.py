@@ -204,7 +204,7 @@ def test_interleaved_layer_views_zero_only_their_own_bytes():
     )
 
     zeroer.zero_block_ids([[1]])
-    torch.cuda.synchronize()
+    torch.accelerator.synchronize()
 
     assert torch.all(pool[0] == 1) and torch.all(pool[2:] == 1)
     assert torch.all(pool[1, 0] == 0), "layer 0's block 1 must be zeroed"
@@ -230,7 +230,7 @@ def test_block_ids_are_group_scoped():
     zeroer._group_meta[1] = zeroer.build_meta([storage_b.data_ptr()], [96], [96])
 
     zeroer.zero_block_ids([[1], [3]])
-    torch.cuda.synchronize()
+    torch.accelerator.synchronize()
 
     assert torch.all(storage_a[1] == 0) and torch.all(storage_b[3] == 0)
     # The flat-list bug applied every id to every group.
@@ -263,7 +263,7 @@ def test_virtual_block_split_zeroes_every_sub_block():
 
     # Logical block 1 = kernel blocks 2 and 3.
     zeroer.zero_block_ids([[1]])
-    torch.cuda.synchronize()
+    torch.accelerator.synchronize()
 
     assert torch.all(pool[:2, 0] == 1) and torch.all(pool[4:, 0] == 1)
     assert torch.all(pool[2, 0] == 0) and torch.all(pool[3, 0] == 0)

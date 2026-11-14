@@ -209,12 +209,12 @@ def split_tensor_along_last_dim(
 
 
 def balanced_row_counts(num_rows: int, size: int) -> list[int]:
-    """Per-rank row counts, ``base + (r < rem)``.
+    """Per-rank row counts, `base + (r < rem)`.
 
     Remainder rows go one each to the lowest-numbered ranks, so the union over
     ranks is exact with no gap, overlap, or padding row at any row count.
     Per-rank counts may differ by one, which is why consumers gather with
-    ``all_gatherv(sizes=...)`` rather than ``all_gather``.
+    `all_gatherv(sizes=...)` rather than `all_gather`.
 
     Every row-sharding feature (indexer query shard, unreplicated attention
     GEMMs, mHC prenorm shard) must derive from this one rule; two features
@@ -226,8 +226,8 @@ def balanced_row_counts(num_rows: int, size: int) -> list[int]:
 
 
 def balanced_row_bounds(start: int, stop: int, rank: int, size: int) -> tuple[int, int]:
-    """This rank's contiguous half-open ``balanced_row_counts`` range within
-    ``[start, stop)``, in closed form."""
+    """This rank's contiguous half-open `balanced_row_counts` range within
+    `[start, stop)`, in closed form."""
     base, rem = divmod(stop - start, size)
     lo = start + rank * base + min(rank, rem)
     return lo, lo + base + (rank < rem)

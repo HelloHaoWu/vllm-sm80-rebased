@@ -686,7 +686,7 @@ def _build_ragged_into_graph_buffers(
     reads. Building in place gets that for free -- the previous form allocated
     fresh tensors and copied them over, which cost two device-to-device
     memcpy nodes per builder per step. The returned indices view keeps the
-    full ``num_rows * max_entries_per_row`` capacity (indptr carries the true
+    full `num_rows * max_entries_per_row` capacity (indptr carries the true
     NNZ), which is also what the gfx950 sync-free split selector expects.
     """
     max_entries = max(num_rows * max_entries_per_row, 1)

@@ -324,10 +324,15 @@ class IndexerQMxFp4Kernel(VllmCuTeDSLJitKernel["IndexerQMxFp4Kernel.CompileKey"]
         *,
         cos_sin_dtype: type[cutlass.Numeric],
         weights_out_dtype: type[cutlass.Numeric],
+        weights_dtype: type[cutlass.Numeric] = BFloat16,
         **compile_key_fields: int,
     ) -> CompileKey:
         return self.CompileKey(
-            **compile_key_fields,
+            head_dim=compile_key_fields["head_dim"],
+            rope_dim=compile_key_fields["rope_dim"],
+            num_heads=compile_key_fields["num_heads"],
+            coarsen=compile_key_fields["coarsen"],
+            weights_dtype=weights_dtype,
             cos_sin_dtype=cos_sin_dtype,
             weights_out_dtype=weights_out_dtype,
         )
@@ -613,10 +618,15 @@ class IndexerQFp8Kernel(VllmCuTeDSLJitKernel["IndexerQFp8Kernel.CompileKey"]):
         self,
         *,
         cos_sin_dtype: type[cutlass.Numeric],
+        weights_dtype: type[cutlass.Numeric] = BFloat16,
         **compile_key_fields: int,
     ) -> CompileKey:
         return self.CompileKey(
-            **compile_key_fields,
+            head_dim=compile_key_fields["head_dim"],
+            rope_dim=compile_key_fields["rope_dim"],
+            num_heads=compile_key_fields["num_heads"],
+            coarsen=compile_key_fields["coarsen"],
+            weights_dtype=weights_dtype,
             cos_sin_dtype=cos_sin_dtype,
         )
 

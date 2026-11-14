@@ -612,7 +612,7 @@ class StreamingParserEngine:
         value: str,
         token_count: int = 0,
     ) -> list[SemanticEvent]:
-        """Apply a ``validate_tool_name`` transition but hold its events.
+        """Apply a `validate_tool_name` transition but hold its events.
 
         The events (and every TOOL_NAME chunk that follows) stay
         buffered until the name completes and validates, so a false

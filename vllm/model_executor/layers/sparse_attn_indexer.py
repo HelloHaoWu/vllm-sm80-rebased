@@ -263,8 +263,8 @@ def _all_reduce_decode_topk(
 
     A sum-all_reduce over a buffer each rank zeroes outside the rows it owns
     carries exactly what an all-gather would: every other rank adds exact +0.0
-    to a row, and ``x + 0.0 == x`` for every float, so each row arrives
-    bit-identical to the value its owner computed. Unlike ``all_gatherv`` it
+    to a row, and `x + 0.0 == x` for every float, so each row arrives
+    bit-identical to the value its owner computed. Unlike `all_gatherv` it
     needs no per-rank sizes and takes the one-shot custom all-reduce, which is
     what makes it affordable once per ratio-4 layer inside a full cudagraph.
 
@@ -273,15 +273,15 @@ def _all_reduce_decode_topk(
     2**24 is exact there, against compressed KV positions under 2**16 at this
     model's 256k context.
 
-    The owned rows are read back out of ``topk_indices_buffer`` rather than
+    The owned rows are read back out of `topk_indices_buffer` rather than
     from the top-k kernel's output tensor: the kernel scatters only the slots
     it fills and leaves the rest at the -1 pre-fill, so the buffer, not the
     kernel, holds the full row.
 
     The clamp is a no-op on every real index -- each is -1 or a position below
-    ``max_index`` -- and bounds the one case that is not real:
-    ``CustomAllreduce.custom_all_reduce``'s non-capturing warm-up branch
-    returns ``torch.empty_like``, and these values are gathered as KV offsets.
+    `max_index` -- and bounds the one case that is not real:
+    `CustomAllreduce.custom_all_reduce`'s non-capturing warm-up branch
+    returns `torch.empty_like`, and these values are gathered as KV offsets.
     That branch is why VLLM_LOCAL_ARGMAX_ALLREDUCE ships off by default;
     clamping before the result is used as an index is what makes the DSpark
     fused Markov step safe with the same exchange, and it is what makes this

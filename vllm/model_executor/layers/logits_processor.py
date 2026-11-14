@@ -59,18 +59,18 @@ def reduce_global_argmax(
 ) -> torch.Tensor:
     """Reduce per-shard maxima that already carry global vocab ids.
 
-    ``values`` and ``global_ids`` are ``[..., num_shards]``; the result is
-    ``[...]``. Ties resolve to the lowest global id, taken as the minimum id
+    `values` and `global_ids` are `[..., num_shards]`; the result is
+    `[...]`. Ties resolve to the lowest global id, taken as the minimum id
     among the shards that reach the maximum, so the result depends neither on
-    shard order nor on ``torch.argmax``'s tie-break. That rule is the one that
+    shard order nor on `torch.argmax`'s tie-break. That rule is the one that
     matches a replicated argmax over the concatenated vocab, which returns the
     first -- i.e. lowest -- maximal index.
 
     The masked-out lanes carry the row's largest id rather than a sentinel, so
     the result is always an id some shard offered. That matters for a NaN row,
-    where ``values == best`` is false everywhere: an out-of-vocab id would be
+    where `values == best` is false everywhere: an out-of-vocab id would be
     returned into an embedding lookup and fail as an async device-side assert,
-    while a replicated ``argmax`` on the same row returns a valid (if
+    while a replicated `argmax` on the same row returns a valid (if
     meaningless) token.
     """
     best = values.max(dim=-1, keepdim=True).values
@@ -248,16 +248,16 @@ class LogitsProcessor(PluggableLayer):
     ) -> torch.Tensor:
         """This rank's slice of the logits, stopping before the vocab gather.
 
-        Everything :meth:`forward` applies elementwise (soft cap, scale) but
+        Everything `forward` applies elementwise (soft cap, scale) but
         without the all-gather, plus the padding mask that makes an argmax over
         the slice safe. The mask is not cosmetic: a shard whose vocab range
-        runs past ``org_vocab_size`` holds rows the weight loader zero-fills
-        (``vocab_parallel_embedding.py:485``), so a padded column scores 0 and
-        wins outright whenever every real logit is negative. :meth:`forward`
+        runs past `org_vocab_size` holds rows the weight loader zero-fills
+        (`vocab_parallel_embedding.py:485`), so a padded column scores 0 and
+        wins outright whenever every real logit is negative. `forward`
         avoids this by truncating *after* the gather, which a sharded consumer
         cannot do.
 
-        ``extra_logits`` is an optional ``[*, shard_width]`` term added before
+        `extra_logits` is an optional `[*, shard_width]` term added before
         the mask, for a selection that spans the sum of two vocab-parallel
         projections over the same shard layout -- DSpark's Markov transition
         bias on top of the base draft logits.

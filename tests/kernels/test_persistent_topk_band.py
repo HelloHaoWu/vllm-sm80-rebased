@@ -14,9 +14,9 @@ and 183/183 direct kernel checks (this test's cases). The reporter ran a
 csrc/libtorch_stable/topk.cu. This test pins the in-band behaviour so any
 future topk.cu change that regresses it fails loudly rather than silently.
 
-Poison values above ``lengths`` mirror production, which calls the indexer
+Poison values above `lengths` mirror production, which calls the indexer
 logits kernels with clean_logits=False: memory beyond seq_len is garbage,
-and the kernel must respect ``lengths`` internally.
+and the kernel must respect `lengths` internally.
 """
 
 import pytest

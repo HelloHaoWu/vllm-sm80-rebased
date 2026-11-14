@@ -378,7 +378,7 @@ def test_non_streaming_recovers_every_tolerated_wrapper_spelling(block):
 def test_variants_never_displace_the_canonical_spelling():
     """The first declared spelling is the one the format reports.
 
-    ``terminal_literal`` backs the renderer, structural-tag grammars and any
+    `terminal_literal` backs the renderer, structural-tag grammars and any
     stop string handed to the sampler, so a tolerated misspelling must never
     become the spelling vLLM itself emits.
     """
@@ -391,7 +391,7 @@ def test_variants_never_displace_the_canonical_spelling():
 def test_token_id_terminals_stay_single_canonical_strings():
     """Token-id matching has no variant form.
 
-    ``token_id_terminals`` is typed ``dict[str, str]``: a special token is
+    `token_id_terminals` is typed `dict[str, str]`: a special token is
     either in the vocab or it is not, so widening the text terminals must not
     leak tuples into it.
     """

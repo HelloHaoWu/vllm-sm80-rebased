@@ -138,7 +138,11 @@ steps:
   - tests/kernels/test_top_k_per_row.py # it runs on Blackwell too - some kernels have arch-specific optimizations
   commands:
     - pytest -v -s kernels/test_fused_deepseek_v4_qnorm_rope_kv_insert.py
-    - pytest -v -s kernels/test_top_k_per_row.py
+    - >-
+      pytest -v -s
+      kernels/test_top_k_per_row.py
+      kernels/test_topk_determinism.py
+      kernels/test_persistent_topk_band.py
   mirror:
     amd:
       label: ":amd: (MI355 DPX) DeepSeek V4 Fused Kernels"
@@ -1344,3 +1348,23 @@ steps:
   - tests/kernels/mamba/utils.py
   commands:
   - pytest -v -s kernels/mamba/test_mamba_ssm.py kernels/mamba/test_replayssm_standard_decode_mamba2.py
+
+- label: ":nvidia: (H100) Backport Model Helper Regressions"
+  key: backport-model-helpers-h100
+  device: h100
+  num_devices: 1
+  timeout_in_minutes: 30
+  working_dir: /vllm-workspace/tests
+  source_file_dependencies:
+  - vllm/models/deepseek_v4/
+  - vllm/models/glm5next/
+  - vllm/models/mimo_v2/
+  - tests/models/test_deepseek_v4_input_gemm_fusion.py
+  - tests/models/test_glm5next_fp8_pp_load.py
+  - tests/models/test_mimo_v2_fused_qkv_shard.py
+  commands:
+  - >-
+    pytest -v -s
+    models/test_deepseek_v4_input_gemm_fusion.py
+    models/test_glm5next_fp8_pp_load.py
+    models/test_mimo_v2_fused_qkv_shard.py

@@ -38,6 +38,9 @@ from vllm.model_executor.layers.quantization.utils.marlin_utils import (
     get_marlin_workspace,
     marlin_moe_intermediate_size,
 )
+from vllm.model_executor.layers.quantization.utils.marlin_utils_legacy import (
+    get_marlin_input_dtype,
+)
 from vllm.model_executor.layers.quantization.utils.quant_utils import (
     QuantKey,
     kFp8Static128BlockSym,
@@ -222,11 +225,15 @@ def fused_marlin_moe(
     output: torch.Tensor | None = None,
     activation_config: ApplyMoEActivationConfig | None = None,
     mul_topk_weights_in_gemm2: bool = True,
+    input_global_scale1: torch.Tensor | None = None,
+    input_global_scale2: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """This function computes a Mixture of Experts (MoE) layer using two sets of
     weights, w1 and w2, and top-k gating mechanism.
 
     Args:
+        input_global_scale1: Legacy W4A8 first-projection activation scale.
+        input_global_scale2: Legacy W4A8 second-projection activation scale.
         hidden_states (torch.Tensor): The input tensor to the MoE layer.
         w1 (torch.Tensor): The first set of expert weights.
         w2 (torch.Tensor): The second set of expert weights.
@@ -268,6 +275,45 @@ def fused_marlin_moe(
         torch.Tensor: The output tensor after applying the MoE layer.
 
     """
+    dtype = (
+        get_marlin_input_dtype()
+        if ScalarType.from_id(quant_type_id).size_bits == 4
+        else None
+    )
+    if dtype is not None:
+        from . import marlin_moe_legacy as legacy
+
+        return legacy.fused_marlin_moe(
+            hidden_states=hidden_states,
+            w1=w1,
+            w2=w2,
+            bias1=bias1,
+            bias2=bias2,
+            w1_scale=w1_scale,
+            w2_scale=w2_scale,
+            topk_weights=topk_weights,
+            topk_ids=topk_ids,
+            quant_type_id=quant_type_id,
+            apply_router_weight_on_input=apply_router_weight_on_input,
+            global_num_experts=global_num_experts,
+            activation=activation,
+            activation_func=activation_func,
+            moe_sum=moe_sum,
+            expert_map=expert_map,
+            global_scale1=global_scale1,
+            global_scale2=global_scale2,
+            w1_zeros=w1_zeros,
+            w2_zeros=w2_zeros,
+            workspace=workspace,
+            intermediate_cache13=intermediate_cache13,
+            intermediate_cache2=intermediate_cache2,
+            output=output,
+            activation_config=activation_config,
+            mul_topk_weights_in_gemm2=mul_topk_weights_in_gemm2,
+            input_dtype=dtype,
+            input_global_scale1=input_global_scale1,
+            input_global_scale2=input_global_scale2,
+        )
     quant_type = ScalarType.from_id(quant_type_id)
     assert quant_type in [
         scalar_types.uint4,
@@ -387,6 +433,8 @@ def batched_fused_marlin_moe(
     output: torch.Tensor | None = None,
     activation_func: Callable[..., None] | None = None,
     activation_config: ApplyMoEActivationConfig | None = None,
+    input_global_scale1: torch.Tensor | None = None,
+    input_global_scale2: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """This function massages the inputs so the batched hidden_states can be
     presented as a 2D contiguous tensor that could be used with
@@ -411,6 +459,42 @@ def batched_fused_marlin_moe(
     expert_ids tensors, so only relevant/valid rows of A (hidden_states)
     are accessed and are processed with the correct expert_ids.
     """
+    dtype = (
+        get_marlin_input_dtype()
+        if ScalarType.from_id(quant_type_id).size_bits == 4
+        else None
+    )
+    if dtype is not None:
+        from . import marlin_moe_legacy as legacy
+
+        return legacy.batched_fused_marlin_moe(
+            hidden_states=hidden_states,
+            expert_num_tokens=expert_num_tokens,
+            w1=w1,
+            w2=w2,
+            bias1=bias1,
+            bias2=bias2,
+            w1_scale=w1_scale,
+            w2_scale=w2_scale,
+            quant_type_id=quant_type_id,
+            apply_router_weight_on_input=apply_router_weight_on_input,
+            global_num_experts=global_num_experts,
+            activation=activation,
+            expert_map=expert_map,
+            global_scale1=global_scale1,
+            global_scale2=global_scale2,
+            w1_zeros=w1_zeros,
+            w2_zeros=w2_zeros,
+            workspace=workspace,
+            intermediate_cache13=intermediate_cache13,
+            intermediate_cache2=intermediate_cache2,
+            output=output,
+            activation_func=activation_func,
+            activation_config=activation_config,
+            input_dtype=dtype,
+            input_global_scale1=input_global_scale1,
+            input_global_scale2=input_global_scale2,
+        )
     assert hidden_states.ndim == 3, (
         f"hidden states must be batched. e.g. [B, MAX_TOKENS, K]."
         f"But got {hidden_states.size()}"
@@ -725,6 +809,8 @@ class MarlinExperts(LoRAExpertsMixin, MarlinExpertsBase):
                 topk_weights=topk_weights,
                 topk_ids=topk_ids,
                 global_scale1=self.g1_alphas,
+                input_global_scale1=self.a1_gscale,
+                input_global_scale2=self.a2_gscale,
                 global_scale2=self.g2_alphas,
                 w1_zeros=self.w1_zp,
                 w2_zeros=self.w2_zp,
@@ -836,6 +922,8 @@ class MarlinExperts(LoRAExpertsMixin, MarlinExpertsBase):
             topk_weights=topk_weights,
             topk_ids=topk_ids,
             global_scale1=self.g1_alphas,
+            input_global_scale1=self.a1_gscale,
+            input_global_scale2=self.a2_gscale,
             global_scale2=self.g2_alphas,
             w1_zeros=self.w1_zp,
             w2_zeros=self.w2_zp,
@@ -967,6 +1055,8 @@ class BatchedMarlinExperts(MarlinExpertsBase):
             global_num_experts=global_num_experts,
             activation=activation,
             expert_map=expert_map,
+            input_global_scale1=self.a1_gscale,
+            input_global_scale2=self.a2_gscale,
             output=output,
             intermediate_cache13=workspace13,
             intermediate_cache2=workspace2,

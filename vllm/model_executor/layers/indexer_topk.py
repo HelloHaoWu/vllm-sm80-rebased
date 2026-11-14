@@ -185,6 +185,10 @@ class SparseIndexerTopk(torch.nn.Module):
             and not current_platform.is_device_capability_family(110)
             and not current_platform.is_device_capability_family(120)
         )
+        capability = current_platform.get_device_capability() if self._is_cuda else None
+        self._backport_capable = capability is not None and capability.major >= 8
+        self._backport_auto = capability is not None and capability.to_int() == 80
+        self._logged_backends: set[tuple[str, torch.dtype, str]] = set()
         self._is_rocm = current_platform.is_rocm()
         self._aiter_enabled = False
         self._aiter_capable = False
@@ -193,6 +197,21 @@ class SparseIndexerTopk(torch.nn.Module):
 
             self._aiter_enabled = bool(rocm_aiter_ops.is_enabled())
             self._aiter_capable = bool(rocm_aiter_ops.is_indexer_top_k_enabled())
+
+    def _log_backend(self, phase: str, logits: torch.Tensor, backend: str) -> None:
+        key = (phase, logits.dtype, backend)
+        if key in self._logged_backends or torch.compiler.is_compiling():
+            return
+        if logits.is_cuda and torch.cuda.is_current_stream_capturing():
+            return
+        logger.info(
+            "Sparse indexer %s Top-K: device=%s dtype=%s backend=%s",
+            phase,
+            logits.device,
+            logits.dtype,
+            backend,
+        )
+        self._logged_backends.add(key)
 
     def resolve_backend(
         self, logits: torch.Tensor, topk_tokens: int, num_rows: int
@@ -204,7 +223,9 @@ class SparseIndexerTopk(torch.nn.Module):
             return self._resolve_auto(logits, topk_tokens, num_rows)
 
         failures: list[str] = []
-        if self._backend == "cooperative":
+        if self._backend == "backport":
+            failures = self._backport_constraints(logits, topk_tokens)
+        elif self._backend == "cooperative":
             failures = self._cooperative_constraints(logits, topk_tokens, num_rows)
         elif self._backend == "persistent":
             if not (self._is_cuda or self._is_rocm):
@@ -292,6 +313,18 @@ class SparseIndexerTopk(torch.nn.Module):
             and self.resolve_backend(logits, topk_tokens, num_rows) == "persistent"
         )
 
+    def _backport_constraints(self, logits: torch.Tensor, topk: int) -> list[str]:
+        failures = []
+        if not self._backport_capable or logits.device.type != "cuda":
+            failures.append("requires a CUDA SM80+ device")
+        if logits.dtype != torch.float32 or logits.ndim != 2 or logits.stride(1) != 1:
+            failures.append("requires 2D FP32 logits with contiguous columns")
+        if topk not in (512, 1024, 2048):
+            failures.append("topk must be 512, 1024 or 2048")
+        if not hasattr(torch.ops._backport_C, "persistent_topk"):
+            failures.append("Backport Top-K operators were not compiled")
+        return failures
+
     def _resolve_auto(
         self, logits: torch.Tensor, topk_tokens: int, num_rows: int
     ) -> str:
@@ -305,6 +338,8 @@ class SparseIndexerTopk(torch.nn.Module):
         aiter not auto-resolved as it does not outperform the per-row on every shape,
         hence we delegate to the caller to decide when to use it.
         """
+        if self._backport_auto and not self._backport_constraints(logits, topk_tokens):
+            return "backport"
         if not self._cooperative_constraints(logits, topk_tokens, num_rows):
             return "cooperative"
         if self._is_cuda and topk_tokens in (512, 1024, 2048):
@@ -389,6 +424,15 @@ class SparseIndexerTopk(torch.nn.Module):
         back instead of raising, since the same backend setting also drives
         decode.
         """
+        if self._backend == "backport":
+            self.resolve_backend(logits, topk_tokens, logits.shape[0])
+            return "backport"
+        if (
+            self._backend == "auto"
+            and self._backport_auto
+            and not self._backport_constraints(logits, topk_tokens)
+        ):
+            return "backport"
         if (
             self._backend == "flashinfer_gvr2"
             and row_starts is None
@@ -413,6 +457,7 @@ class SparseIndexerTopk(torch.nn.Module):
         shorter than topk_tokens)."""
         num_rows = logits.shape[0]
         backend = self.resolve_prefill_backend(logits, topk_tokens, row_starts)
+        self._log_backend("prefill", logits, backend)
         if backend == "flashinfer_gvr2":
             logger.info_once("Sparse indexer prefill top-k backend: flashinfer_gvr2")
             from flashinfer.topk_varlen.kernels.gvr2_topk_host import run_varlen
@@ -433,7 +478,12 @@ class SparseIndexerTopk(torch.nn.Module):
             if not direct:
                 topk_indices.copy_(out)
             return
-        ops.top_k_per_row_prefill(
+        per_row_prefill = (
+            torch.ops._backport_C.top_k_per_row_prefill
+            if backend == "backport"
+            else ops.top_k_per_row_prefill
+        )
+        per_row_prefill(
             logits,
             torch.zeros_like(row_ends) if row_starts is None else row_starts,
             row_ends,
@@ -509,8 +559,21 @@ class SparseIndexerTopk(torch.nn.Module):
         topk_indices (int32, -1 fill for rows shorter than topk_tokens).
         """
         backend = self.resolve_backend(logits, topk_tokens, logits.shape[0])
+        self._log_backend("decode", logits, backend)
         logger.info_once("Sparse indexer decode top-k backend: %s", backend)
-        if backend == "deep_select":
+        if backend == "backport":
+            (workspace,) = current_workspace_manager().get_simultaneous(
+                ((RADIX_TOPK_WORKSPACE_SIZE,), torch.uint8),
+            )
+            torch.ops._backport_C.persistent_topk(
+                logits,
+                self._row_ends(seq_lens, next_n, logits.shape[0]),
+                topk_indices,
+                workspace,
+                topk_tokens,
+                max_seq_len,
+            )
+        elif backend == "deep_select":
             row_ends = self._row_ends(seq_lens, next_n, logits.shape[0])
             deep_select_topk(logits, topk_tokens, end=row_ends, output_idx=topk_indices)
         elif backend == "cooperative":

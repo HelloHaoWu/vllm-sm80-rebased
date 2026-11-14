@@ -29,8 +29,8 @@ INDEX_HEAD_DIM = 128
 def _fp8_out(t: torch.Tensor) -> torch.Tensor:
     """View an e4m3fn output as the dtype the kernel can actually store.
 
-    Triton refuses every ``fp8e4nv`` convert below SM89, so on Ampere the
-    kernels encode the byte themselves (``_encode_e4m3fn_u8``) and write it
+    Triton refuses every `fp8e4nv` convert below SM89, so on Ampere the
+    kernels encode the byte themselves (`_encode_e4m3fn_u8`) and write it
     through a uint8 view of the very same buffer. The tensor handed back to
     callers keeps its float8_e4m3fn dtype either way.
     """

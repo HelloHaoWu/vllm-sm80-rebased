@@ -180,9 +180,9 @@ def _make_draft_vllm_config(
                 rf"re:.*\.layers\.{mtp_start_layer_idx + offset}\..*"
                 for offset in range(num_mtp_layers)
             ]
-            draft_quant_config.ignore = ct_ignore + [
+            ct_ignore.extend(
                 pattern for pattern in extra_ignores if pattern not in ct_ignore
-            ]
+            )
 
     draft_vllm_config = replace(
         vllm_config,

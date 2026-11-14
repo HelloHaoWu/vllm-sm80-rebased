@@ -17,6 +17,8 @@ logger = init_logger(__name__)
 
 current_platform.import_kernels()
 
+import vllm._backport_ops  # noqa: E402, F401
+
 if TYPE_CHECKING:
 
     def register_fake(fn):

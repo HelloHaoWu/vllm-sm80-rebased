@@ -585,7 +585,7 @@ def test_fp8_paged_mqa_logits_torch_next_n_reads_planar_cache():
     Regression for the layout mismatch class reported in
     vllm-project/vllm#50576 (CuritisSun): the cache writer is block-planar
     (all fp8 K bytes, then all fp32 scales), while a reader slicing the
-    nominal ``[NB, BS, 1, D+4]`` shape token-interleaved silently drifts K by
+    nominal `[NB, BS, 1, D+4]` shape token-interleaved silently drifts K by
     4 bytes/token and bitcasts value bytes as scales. Ground truth is derived
     from the source K/scale arrays, never from a second read of the cache.
     """

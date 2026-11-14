@@ -953,6 +953,26 @@ def choose_mp_linear_kernel(
         type[MPLinearKernel]: Chosen kernel.
 
     """
+    from vllm.model_executor.layers.quantization.utils.marlin_utils_legacy import (
+        get_marlin_input_dtype,
+    )
+
+    legacy_dtype = (
+        get_marlin_input_dtype() if config.weight_type.size_bits == 4 else None
+    )
+    if legacy_dtype is not None:
+        from vllm.model_executor.kernels.linear.mixed_precision.marlin_legacy import (
+            BackportMarlinLinearKernel,
+        )
+
+        config.act_type = legacy_dtype
+        supported, reason = BackportMarlinLinearKernel.can_implement(config)
+        if not supported:
+            raise ValueError(f"Legacy Marlin W4A8: {reason}")
+        if not hasattr(torch.ops._backport_C, "marlin_gemm"):
+            raise RuntimeError("Legacy W4A8 operators were not compiled")
+        logger.info_once("Using isolated Backport Marlin W4A8 (%s)", legacy_dtype)
+        return BackportMarlinLinearKernel
     if compute_capability is None:
         if current_platform is None:
             raise ValueError("Cannot determine compute capability")

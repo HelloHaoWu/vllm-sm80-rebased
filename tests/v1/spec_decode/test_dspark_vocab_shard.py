@@ -3,10 +3,10 @@
 """DSpark's vocab-sharded Markov head: gating, layout, and the 8-rank path.
 
 The reduction itself is covered on CPU by
-``tests/v1/sample/test_local_argmax_reduce.py``; what is DSpark-specific is
+`tests/v1/sample/test_local_argmax_reduce.py`; what is DSpark-specific is
 *when* the sharded layout is chosen and whether the shipped draft loop agrees
 with the replicated one. The latter needs a real TP group, so it runs under
-torchrun via ``dspark_vocab_shard_torchrun.py`` and is skipped on boxes with
+torchrun via `dspark_vocab_shard_torchrun.py` and is skipped on boxes with
 fewer than 8 GPUs.
 """
 

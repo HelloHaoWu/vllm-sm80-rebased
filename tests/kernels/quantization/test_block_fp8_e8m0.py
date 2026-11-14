@@ -16,7 +16,7 @@ from vllm.model_executor.layers.quantization.utils.fp8_utils import (
 )
 from vllm.platforms import current_platform
 
-if not current_platform.is_cuda() or current_platform.get_device_capability() < (8, 9):
+if not current_platform.is_cuda() or not current_platform.has_device_capability(89):
     pytest.skip(
         "Triton fp8 GEMM needs CUDA SM89+ (fp8e4nv loads)", allow_module_level=True
     )

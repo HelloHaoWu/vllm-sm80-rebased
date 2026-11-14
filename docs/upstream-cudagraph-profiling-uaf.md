@@ -43,7 +43,7 @@ Two aggravating factors:
 Last log line is always the model warmup entering its first real prefill
 (`warmup_kernels` → `worker_execute_model(prefill_output)`); then every rank hits:
 
-```
+```text
 misc/strongstream.cc:426 (ncclStrongStreamSynchronize) NCCL WARN Cuda failure
 'an illegal memory access was encountered'
 ... torch.distributed.DistBackendError: NCCL error ... ncclUnhandledCudaError
@@ -64,7 +64,7 @@ The profiling pass executes iff `cudagraph_mode != NONE` (`gpu_worker.py:549-552
 That predicate matches our stability matrix **exactly**:
 
 | # | Config | cudagraph_mode | profiling runs? | Result |
-|---|--------|----------------|------------------|--------|
+| --- | -------- | ---------------- | ------------------ | -------- |
 | 1 | `--enforce-eager` (+MTP) | NONE | no | **stable** (full benchmark passes) |
 | 2 | `-O0` (CompilationMode NONE) | NONE | no | **stable** (4-topology benchmark suite passes) |
 | 3 | default compile (piecewise graphs) | ≠NONE | yes | IMA at first warmup prefill |
@@ -170,13 +170,14 @@ keeping it on plus the real fix.)
 
 ## Repro (our stack; should transfer to any hybrid GDN model)
 
-```
+```text
 vllm serve <Qwen3.5-hybrid-model> \
   --tensor-parallel-size 8 --pipeline-parallel-size 1 \
   --kv-cache-dtype int8_per_token_head \
   --max-model-len 1000000 <yarn overrides> \
   # default compilation config, i.e. piecewise graphs on
 ```
+
 → IMA at first warmup prefill, every boot.
 Add `--compilation-config '{"cudagraph_mode": "NONE"}'` (or `-O0`, or
 `--enforce-eager`) → boots and serves normally.

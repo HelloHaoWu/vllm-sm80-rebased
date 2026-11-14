@@ -705,10 +705,10 @@ class AnthropicServingMessages(OpenAIServingChat):
         cls,
         anthropic_request: AnthropicMessagesRequest | AnthropicCountTokensRequest,
     ) -> dict[str, Any]:
-        """Merge the Anthropic ``thinking`` config into chat template kwargs.
+        """Merge the Anthropic `thinking` config into chat template kwargs.
 
         Anthropic semantics: extended thinking is off unless the request
-        carries ``thinking: {"type": "enabled"}``. Without this mapping the
+        carries `thinking: {"type": "enabled"}`. Without this mapping the
         field is silently dropped and the template falls back to its own
         default (thinking mode since the 0731 contract), putting every
         /v1/messages session in a mode the client never asked for.

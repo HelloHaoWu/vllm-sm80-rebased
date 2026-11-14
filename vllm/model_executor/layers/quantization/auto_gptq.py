@@ -772,6 +772,8 @@ class AutoGPTQMoEMethod(FusedMoEMethodBase):
             w2_zp=getattr(layer, "w2_qzeros", None) if use_zp else None,
             w1_bias=getattr(layer, "w13_bias", None),
             w2_bias=getattr(layer, "w2_bias", None),
+            a1_gscale=getattr(layer, "_backport_a1_gscale", None),
+            a2_gscale=getattr(layer, "_backport_a2_gscale", None),
         )
 
     def apply(

@@ -133,6 +133,7 @@ class TestNonStreaming:
         result = parser.extract_tool_calls(text, mock_request)
         assert result.tools_called
         assert result.content is not None
+        assert result.content is not None
         assert "Let me check" in result.content
 
     def test_missing_func_start_orphan_invoke(self, mock_tokenizer, mock_request):
@@ -181,6 +182,7 @@ class TestNonStreaming:
         assert result.tool_calls[0].function.name == "get_weather"
         args = json.loads(result.tool_calls[0].function.arguments)
         assert args == {"city": "SF"}
+        assert result.content is not None
         assert "Stray foreign text." in result.content
 
     def test_foreign_tool_calls_wrapper_rejected(self, mock_tokenizer, mock_request):
@@ -307,6 +309,7 @@ class TestOrphanInvokeNameValidation:
         assert result.tool_calls[0].function.name == "get_weather"
         args = json.loads(result.tool_calls[0].function.arguments)
         assert args == {"city": "SF"}
+        assert result.content is not None
         assert DSML_INVOKE_PREFIX in result.content
 
     def test_quoted_marker_directly_before_wrapped_call(
@@ -328,9 +331,11 @@ class TestOrphanInvokeNameValidation:
         assert result.tool_calls[0].function.name == "get_weather"
         args = json.loads(result.tool_calls[0].function.arguments)
         assert args == {"city": "SF"}
+        assert result.content is not None
         assert DSML_INVOKE_PREFIX in result.content
         # The wrapper token opens the real tool call, so it must be
         # consumed by the parser rather than left in the content.
+        assert result.content is not None
         assert DSML_FUNC_START not in result.content
 
     def test_streaming_quoted_marker_then_wrapped_call(
@@ -408,7 +413,7 @@ class TestOrphanInvokeNameValidation:
         is nothing but whitespace when the response called tools, so it
         passes whether or not the engine holds the padding back.  The
         test that actually pins the holding back is
-        ``test_padding_between_orphan_invokes_is_dropped_after_prose``.
+        `test_padding_between_orphan_invokes_is_dropped_after_prose`.
         """
         time_tool = _make_tool("get_time", {"timezone": {"type": "string"}})
         parser = DeepSeekV32Parser(mock_tokenizer, tools=[weather_tool, time_tool])
@@ -563,7 +568,7 @@ class TestOrphanInvokeNameValidation:
         must leave nothing behind.
 
         The invoke below is held while its name is read, then given up
-        on because ``get_nothing`` was never declared.  The wrapped call
+        on because `get_nothing` was never declared.  The wrapped call
         after it is ordinary, so the stray text between its invokes is
         dropped.
         """
@@ -780,11 +785,11 @@ class TestStreaming:
 
 
 class TestMissingFunctionCallsWrapper:
-    """An invoke without the ``<｜DSML｜function_calls>`` wrapper is still a
+    """An invoke without the `<｜DSML｜function_calls>` wrapper is still a
     tool call (V3.2 counterpart of #48931).
 
     Recovery is only attempted for names the request declared (the invoke
-    marker has no dedicated special token), so these tests declare ``fn``.
+    marker has no dedicated special token), so these tests declare `fn`.
     """
 
     @pytest.fixture(autouse=True)

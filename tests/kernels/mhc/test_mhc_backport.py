@@ -123,8 +123,8 @@ def hc_head_ref(
 @pytest.mark.parametrize("hc_mult", [4])
 @pytest.mark.parametrize("fuse_norm", [False, True])
 def test_mhc_pre_tilelang(num_tokens, hidden_size, hc_mult, fuse_norm):
-    """``fuse_norm`` selects the RMSNorm-fused kernel, which is the variant
-    DeepSeek V4 actually runs (the model always passes ``norm_weight``)."""
+    """`fuse_norm` selects the RMSNorm-fused kernel, which is the variant
+    DeepSeek V4 actually runs (the model always passes `norm_weight`)."""
     torch.set_default_device(DEVICE)
     set_random_seed(0)
 
@@ -197,9 +197,9 @@ def test_mhc_pre_tilelang(num_tokens, hidden_size, hc_mult, fuse_norm):
 @pytest.mark.parametrize("hc_mult", [4])
 def test_mhc_pre_broadcast_tilelang(num_tokens, hidden_size, hc_mult):
     """First-layer variant: the (T, H) residual is broadcast across the
-    hc_mult streams, so the result must match ``mhc_pre_ref`` on the
+    hc_mult streams, so the result must match `mhc_pre_ref` on the
     explicitly expanded residual. RMSNorm fusion is mandatory here (the
-    wrapper asserts ``norm_weight``), matching how the model calls it."""
+    wrapper asserts `norm_weight`), matching how the model calls it."""
     _run_mhc_pre_broadcast_case(num_tokens, hidden_size, hc_mult)
 
 
@@ -217,7 +217,7 @@ def test_mhc_pre_broadcast_tilelang_without_deep_gemm(
 
     The broadcast variant is the one that reaches the prenorm GEMM through a
     separate branch from its two siblings, and on a pre-Hopper device the
-    DeepGEMM branch aborts in ``hyperconnection.hpp`` rather than returning
+    DeepGEMM branch aborts in `hyperconnection.hpp` rather than returning
     wrong numbers. Below SM90 this is what the test above already runs, so
     the point of forcing it is coverage on hardware where DeepGEMM *is*
     supported and the fallback would otherwise never execute.

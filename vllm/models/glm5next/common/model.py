@@ -992,6 +992,7 @@ class Glm5NextModel(nn.Module, EagleModelMixin):
         # (see Glm5NextModel.forward). Mirrors DSV4's hc_mult hand-off.
         # Only key "hidden_states"; residual/post/comb are re-derived on
         # the receiving rank by standalone hc_pre.
+        shape: tuple[int, ...]
         if getattr(self.config, "mhc", False):
             shape = (
                 batch_size,

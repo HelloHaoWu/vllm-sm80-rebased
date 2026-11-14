@@ -25,8 +25,10 @@ histogram_256 medium (<=32768), and the multi-CTA radix path (>32768).
 import pytest
 import torch
 
-import vllm._custom_ops as ops
+import vllm._custom_ops  # noqa: F401
 from vllm.platforms import current_platform
+
+ops = torch.ops._backport_C
 
 K = 512
 ITERS = 10
@@ -55,7 +57,7 @@ def _reference_set(logits_row: torch.Tensor, k: int) -> frozenset[int]:
 def _run_persistent(logits, lengths, k, max_len):
     out = torch.full((logits.shape[0], k), -1, dtype=torch.int32, device="cuda")
     ws = torch.zeros(WORKSPACE_BYTES, dtype=torch.uint8, device="cuda")
-    torch.ops._C.persistent_topk(logits, lengths, out, ws, k, max_len)
+    torch.ops._backport_C.persistent_topk(logits, lengths, out, ws, k, max_len)
     return out
 
 

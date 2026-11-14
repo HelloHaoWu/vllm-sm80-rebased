@@ -37,7 +37,8 @@ def _fp8_pair(name_prefix):
 
 def test_indexer_wk_skips_pp_missing_layer():
     params_dict: dict = {}  # layer lives on another PP rank
-    buf, loaded = {}, set()
+    buf: dict = {}
+    loaded: set[str] = set()
     (w_name, w), (s_name, s) = _fp8_pair("model.layers.0.self_attn.indexer.wk")
 
     assert _try_load_fp8_indexer_wk(w_name, w, buf, params_dict, loaded, PP_MISSING)
@@ -49,7 +50,8 @@ def test_indexer_wk_skips_pp_missing_layer():
 def test_indexer_wk_dequantizes_owned_layer():
     param = _ParamStub()
     params_dict = {"model.layers.1.self_attn.indexer.wk_weights_proj.weight": param}
-    buf, loaded = {}, set()
+    buf: dict = {}
+    loaded: set[str] = set()
     (w_name, w), (s_name, s) = _fp8_pair("model.layers.1.self_attn.indexer.wk")
 
     assert _try_load_fp8_indexer_wk(w_name, w, buf, params_dict, loaded, [])
@@ -63,7 +65,8 @@ def test_indexer_wk_dequantizes_owned_layer():
 
 def test_attn_proj_skips_pp_missing_layer():
     params_dict: dict = {}
-    buf, loaded = {}, set()
+    buf: dict = {}
+    loaded: set[str] = set()
     (w_name, w), (s_name, s) = _fp8_pair("model.layers.0.self_attn.q_a_proj")
 
     assert _try_load_fp8_attn_proj(w_name, w, buf, params_dict, loaded, 0, PP_MISSING)
@@ -75,7 +78,8 @@ def test_attn_proj_skips_pp_missing_layer():
 def test_attn_proj_dequantizes_owned_layer():
     param = _ParamStub()
     params_dict = {"model.layers.1.self_attn.fused_qkv_a_proj.weight": param}
-    buf, loaded = {}, set()
+    buf: dict = {}
+    loaded: set[str] = set()
     (w_name, w), (s_name, s) = _fp8_pair("model.layers.1.self_attn.q_a_proj")
 
     assert _try_load_fp8_attn_proj(w_name, w, buf, params_dict, loaded, 0, [])

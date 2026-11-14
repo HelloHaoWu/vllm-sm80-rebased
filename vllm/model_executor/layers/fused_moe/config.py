@@ -717,6 +717,8 @@ def gptq_marlin_moe_quant_config(
     w2_zp: torch.Tensor | None = None,
     w1_bias: torch.Tensor | None = None,
     w2_bias: torch.Tensor | None = None,
+    a1_gscale: torch.Tensor | None = None,
+    a2_gscale: torch.Tensor | None = None,
 ):
     """Construct a quant config for gptq marlin quantization."""
     from vllm.model_executor.layers.quantization.utils.quant_utils import GroupShape
@@ -735,8 +737,8 @@ def gptq_marlin_moe_quant_config(
         raise ValueError(f"Unsupported weight_bits: {weight_bits}")
 
     return FusedMoEQuantConfig(
-        _a1=FusedMoEQuantDesc(dtype=None, shape=a_shape),
-        _a2=FusedMoEQuantDesc(dtype=None, shape=a_shape),
+        _a1=FusedMoEQuantDesc(dtype=None, shape=a_shape, alpha_or_gscale=a1_gscale),
+        _a2=FusedMoEQuantDesc(dtype=None, shape=a_shape, alpha_or_gscale=a2_gscale),
         _w1=FusedMoEQuantDesc(weight_dtype, w_shape, w1_scale, None, w1_zp, w1_bias),
         _w2=FusedMoEQuantDesc(weight_dtype, w_shape, w2_scale, None, w2_zp, w2_bias),
     )

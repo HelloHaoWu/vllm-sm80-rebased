@@ -370,6 +370,8 @@ def make_wna16_moe_quant_config(
     w2_zp: torch.Tensor | None = None,
     w1_bias: torch.Tensor | None = None,
     w2_bias: torch.Tensor | None = None,
+    a1_gscale: torch.Tensor | None = None,
+    a2_gscale: torch.Tensor | None = None,
     gemm1_clamp_limit: float | None = None,
     gemm1_alpha: float | None = None,
     gemm1_beta: float | None = None,
@@ -384,6 +386,8 @@ def make_wna16_moe_quant_config(
             w1_bias=w1_bias,
             w2_bias=w2_bias,
             block_shape=[0, group_size],
+            a1_gscale=a1_gscale,
+            a2_gscale=a2_gscale,
             gemm1_clamp_limit=gemm1_clamp_limit,
             gemm1_alpha=gemm1_alpha,
             gemm1_beta=gemm1_beta,
@@ -571,6 +575,32 @@ def _process_weights_marlin(
     4. Permute bias tensors.
     """
     # Canonical N-first → K-first for Marlin.
+    from vllm.model_executor.layers.quantization.utils.marlin_utils_legacy import (
+        get_marlin_input_dtype,
+    )
+
+    dtype = get_marlin_input_dtype()
+    if dtype is not None and num_bits == 4:
+        from . import int_wna16_legacy as legacy
+
+        result = legacy._process_weights_marlin(
+            layer,
+            dtype,
+            num_bits,
+            pack_factor,
+            group_size,
+            w13_qweight,
+            w2_qweight,
+            w13_scales,
+            w2_scales,
+            w13_qzeros,
+            w2_qzeros,
+            w13_bias,
+            w2_bias,
+        )
+        layer.register_buffer("_backport_a1_gscale", result[6], persistent=False)
+        layer.register_buffer("_backport_a2_gscale", result[7], persistent=False)
+        return (*result[:6], *result[8:])
     w13_qweight = w13_qweight.transpose(1, 2).contiguous()
     w2_qweight = w2_qweight.transpose(1, 2).contiguous()
     w13_scales = w13_scales.transpose(1, 2).contiguous()
@@ -696,6 +726,32 @@ def _process_awq_weights_marlin(
     AWQ checkpoints use a different packing order than GPTQ, so they need
     AWQ-specific weight repacking and zero-point conversion before Marlin runs.
     """
+    from vllm.model_executor.layers.quantization.utils.marlin_utils_legacy import (
+        get_marlin_input_dtype,
+    )
+
+    dtype = get_marlin_input_dtype()
+    if dtype is not None:
+        from . import int_wna16_legacy as legacy
+
+        result = legacy._process_awq_weights_marlin(
+            layer,
+            weight_bits,
+            pack_factor,
+            group_size,
+            dtype,
+            w13_qweight,
+            w2_qweight,
+            w13_scales,
+            w2_scales,
+            w13_qzeros,
+            w2_qzeros,
+            w13_bias,
+            w2_bias,
+        )
+        layer.register_buffer("_backport_a1_gscale", result[6], persistent=False)
+        layer.register_buffer("_backport_a2_gscale", result[7], persistent=False)
+        return (*result[:6], *result[8:])
     w13_bias_out: torch.Tensor | None = None
     w2_bias_out: torch.Tensor | None = None
 

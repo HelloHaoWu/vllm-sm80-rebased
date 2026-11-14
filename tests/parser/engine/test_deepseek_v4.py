@@ -388,7 +388,7 @@ class TestMissingToolCallsWrapper:
 
     The invoke marker has no dedicated special token, so recovery is only
     attempted for names the request declared (see
-    ``TestOrphanInvokeNameValidation``); these tests declare ``terminal``.
+    `TestOrphanInvokeNameValidation`); these tests declare `terminal`.
     """
 
     @pytest.fixture(autouse=True)
@@ -424,7 +424,7 @@ class TestMissingToolCallsWrapper:
     ):
         """A response that lost its opening wrapper usually lost the closing
         one too, so text after a recovered block is the rest of the answer
-        and is kept whether or not ``</｜DSML｜tool_calls>`` is present."""
+        and is kept whether or not `</｜DSML｜tool_calls>` is present."""
         text = "pre\n" + self._ORPHAN
         if trailing_end:
             # The closing wrapper drops the padding held after the invoke.
@@ -736,6 +736,7 @@ class TestMissingToolStart:
         assert result.tool_calls[0].function.name == "get_weather"
         args = json.loads(result.tool_calls[0].function.arguments)
         assert args == {"location": "NYC"}
+        assert result.content is not None
         assert "Stray foreign text." in result.content
 
     def test_orphan_invoke_without_declared_tools_stays_content(
@@ -844,6 +845,7 @@ class TestOrphanInvokeNameValidation:
         assert result.tool_calls[0].function.name == "get_weather"
         args = json.loads(result.tool_calls[0].function.arguments)
         assert args == {"location": "NYC"}
+        assert result.content is not None
         assert DSML_INVOKE_PREFIX + "made_up_tool" in result.content
 
     def test_no_tools_name_with_space_stays_content(self, mock_tokenizer, mock_request):
@@ -983,6 +985,7 @@ class TestOrphanInvokeNameValidation:
         assert result.tool_calls[0].function.name == "get_weather"
         args = json.loads(result.tool_calls[0].function.arguments)
         assert args == {"location": "NYC"}
+        assert result.content is not None
         assert DSML_INVOKE_PREFIX in result.content
 
     def test_quoted_marker_directly_before_wrapped_call(
@@ -1003,9 +1006,11 @@ class TestOrphanInvokeNameValidation:
         assert result.tool_calls[0].function.name == "get_weather"
         args = json.loads(result.tool_calls[0].function.arguments)
         assert args == {"location": "NYC"}
+        assert result.content is not None
         assert DSML_INVOKE_PREFIX in result.content
         # The wrapper token opens the real tool call, so it must be
         # consumed by the parser rather than left in the content.
+        assert result.content is not None
         assert DSML_TOOL_START not in result.content
 
     def test_streaming_quoted_marker_then_wrapped_call(
@@ -1112,7 +1117,7 @@ class TestOrphanInvokeNameValidation:
         is nothing but whitespace when the response called tools, so it
         passes whether or not the engine holds the padding back.  The
         test that actually pins the holding back is
-        ``test_padding_between_orphan_invokes_is_dropped_after_prose``.
+        `test_padding_between_orphan_invokes_is_dropped_after_prose`.
         """
         time_tool = _make_tool("get_time", {"timezone": {"type": "string"}})
         parser = self._declared_parser(
@@ -1274,7 +1279,7 @@ class TestOrphanInvokeNameValidation:
         must leave nothing behind.
 
         The invoke below is held while its name is read, then given up
-        on because ``get_nothing`` was never declared.  The wrapped call
+        on because `get_nothing` was never declared.  The wrapped call
         after it is ordinary, so the stray text between its invokes is
         dropped.
         """

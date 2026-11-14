@@ -1,25 +1,24 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""
-LRU capacity manager for the file system KV offload tier.
+"""LRU capacity manager for the file system KV offload tier.
 
 The fs tier has no inherent size bound: every offloaded chunk becomes a file
 and nothing ever deletes them. FsCapacityManager tracks the tier's chunk files
-in an LRU ordering and, once total size exceeds ``capacity_bytes``, unlinks
+in an LRU ordering and, once total size exceeds `capacity_bytes`, unlinks
 least-recently-used files until usage drops below
-``capacity_bytes * watermark``.
+`capacity_bytes * watermark`.
 
 Concurrency model: all mutating calls happen on the scheduler thread (the
-tier's ``submit_store`` / ``touch`` / ``get_finished_jobs`` are only invoked
+tier's `submit_store` / `touch` / `get_finished_jobs` are only invoked
 from there), so a plain dict suffices; a lock is kept for safety against
-future callers. Actual ``unlink`` latency is metadata-only and small, and each
-call to :meth:`evict` is bounded by ``max_evictions_per_step``.
+future callers. Actual `unlink` latency is metadata-only and small, and each
+call to `evict` is bounded by `max_evictions_per_step`.
 
 Load-race protection: a file can be looked up (HIT) and then evicted before
 the load job runs, which would fail the load. Files whose keys were recently
-touched or stored are protected from eviction for ``protect_s`` seconds.
+touched or stored are protected from eviction for `protect_s` seconds.
 
-Restart behavior: the index is rebuilt by scanning ``scan_dirs`` at startup,
+Restart behavior: the index is rebuilt by scanning `scan_dirs` at startup,
 seeding recency from file mtimes, so the LRU ordering survives restarts
 approximately.
 """

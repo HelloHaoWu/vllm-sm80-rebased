@@ -84,7 +84,7 @@ def assert_hoist_preconditions(
     # needed. Largest payload is max_num_batched_tokens x hidden x (1 + 1/16).
     from vllm.distributed.parallel_state import get_tp_group
 
-    ca = get_tp_group().device_communicator.ca_comm
+    ca = getattr(get_tp_group().device_communicator, "ca_comm", None)
     if ca is not None and not ca.disabled:
         max_tokens = vllm_config.scheduler_config.max_num_batched_tokens
         hidden = vllm_config.model_config.get_hidden_size()
@@ -151,7 +151,7 @@ def _ca_comm():
     """
     from vllm.distributed.parallel_state import get_tp_group
 
-    ca = get_tp_group().device_communicator.ca_comm
+    ca = getattr(get_tp_group().device_communicator, "ca_comm", None)
     assert ca is not None and not ca.disabled, (
         "VLLM_MHC_AR_INT8 requires the custom all-reduce communicator"
     )

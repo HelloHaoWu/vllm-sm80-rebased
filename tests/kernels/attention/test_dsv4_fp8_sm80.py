@@ -3,7 +3,7 @@
 """Bit-exactness of the SM80 manual e4m3fn encode/decode helpers.
 
 Wrong rounding here drifts every KV-cache byte and surfaces as gradual
-output corruption, so the encoder must match ``torch.Tensor.to(float8_e4m3fn)``
+output corruption, so the encoder must match `torch.Tensor.to(float8_e4m3fn)`
 bit-for-bit on the clamped domain the kernels feed it, and the ALU decoder
 must invert every byte exactly.
 """

@@ -24,6 +24,8 @@ from vllm.platforms import current_platform
 from vllm.scalar_type import scalar_types
 from vllm.utils.math_utils import round_up
 
+from .marlin_utils import get_marlin_workspace
+
 FP4_MARLIN_SUPPORTED_GROUP_SIZES = [16]
 
 logger = init_logger(__name__)
@@ -159,6 +161,26 @@ def apply_fp4_marlin_linear(
     # For GPUs that lack FP4 hardware support, we can leverage the
     # Marlin kernel for fast weight-only FP4 quantization
 
+    from .marlin_utils_legacy import get_marlin_input_dtype
+
+    input_dtype = get_marlin_input_dtype()
+    if input_dtype is not None:
+        from . import marlin_utils_fp4_legacy as legacy
+
+        return legacy.apply_fp4_marlin_linear(
+            input=input,
+            weight=weight,
+            weight_scale=weight_scale,
+            weight_global_scale=weight_global_scale,
+            workspace=get_marlin_workspace(input.device)
+            if workspace is None
+            else workspace,
+            size_n=size_n,
+            size_k=size_k,
+            bias=bias,
+            use_fp32_reduce=use_fp32_reduce,
+            input_dtype=input_dtype,
+        )
     reshaped_x = input.reshape(-1, input.shape[-1])
     out_shape = input.shape[:-1] + (size_n,)
 
@@ -194,6 +216,13 @@ def apply_fp4_marlin_linear(
 
 
 def prepare_fp4_layer_for_marlin(layer: torch.nn.Module) -> None:
+    from .marlin_utils_legacy import get_marlin_input_dtype
+
+    input_dtype = get_marlin_input_dtype()
+    if input_dtype is not None:
+        from . import marlin_utils_fp4_legacy as legacy
+
+        return legacy.prepare_fp4_layer_for_marlin(layer=layer, input_dtype=input_dtype)
     is_nvfp4 = hasattr(layer, "weight_global_scale")
     group_size = 16 if is_nvfp4 else 32
 
@@ -298,6 +327,21 @@ def prepare_nvfp4_moe_layer_for_marlin(
 ) -> tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
 ]:
+    from .marlin_utils_legacy import get_marlin_input_dtype
+
+    if get_marlin_input_dtype() is not None:
+        from . import marlin_utils_fp4_legacy as legacy
+
+        return legacy.prepare_nvfp4_moe_layer_for_marlin(
+            layer=layer,
+            w13=w13,
+            w13_scale=w13_scale,
+            w13_scale_2=w13_scale_2,
+            w2=w2,
+            w2_scale=w2_scale,
+            w2_scale_2=w2_scale_2,
+            is_act_and_mul=is_act_and_mul,
+        )
     logger.warning_once(
         "Your GPU does not have native support for FP4 computation but "
         "FP4 quantization is being used. Weight-only FP4 compression will "
@@ -401,6 +445,15 @@ def prepare_nvfp4_moe_layer_for_marlin(
 
 
 def prepare_moe_fp4_layer_for_marlin(layer: torch.nn.Module) -> None:
+    from .marlin_utils_legacy import get_marlin_input_dtype
+
+    input_dtype = get_marlin_input_dtype()
+    if input_dtype is not None:
+        from . import marlin_utils_fp4_legacy as legacy
+
+        return legacy.prepare_moe_fp4_layer_for_marlin(
+            layer=layer, input_dtype=input_dtype
+        )
     is_nvfp4 = hasattr(layer, "w13_weight_scale_2")
 
     group_size = 16 if is_nvfp4 else 32
@@ -516,6 +569,21 @@ def prepare_moe_mxfp4_layer_for_marlin(
     Takes weight tensors as inputs and returns transformed tensors.
     Does NOT modify the layer in-place.
     """
+    from .marlin_utils_legacy import get_marlin_input_dtype
+
+    input_dtype = get_marlin_input_dtype()
+    if input_dtype is not None:
+        from . import marlin_utils_fp4_legacy as legacy
+
+        return legacy.prepare_moe_mxfp4_layer_for_marlin(
+            layer=layer,
+            w13=w13,
+            w2=w2,
+            w13_scale=w13_scale,
+            w2_scale=w2_scale,
+            w13_bias=w13_bias,
+            w2_bias=w2_bias,
+        )
     group_size = 32  # MXFP4 block size
 
     # Derive dimensions from actual weight shapes to handle rounded/padded

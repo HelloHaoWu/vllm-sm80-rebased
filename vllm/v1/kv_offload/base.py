@@ -341,6 +341,7 @@ class OffloadingManager(ABC):
         since a real lock need not be reentrant.
         """
         return nullcontext()
+
     def reserve_hits(
         self, keys: "Collection[OffloadKey]", req_context: "ReqContext"
     ) -> "list[OffloadKey]":

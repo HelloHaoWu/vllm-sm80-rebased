@@ -726,6 +726,8 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
                 gemm1_clamp_limit=getattr(layer, "swiglu_limit", None),
             )
         return make_wna16_moe_quant_config(
+            a1_gscale=getattr(layer, "_backport_a1_gscale", None),
+            a2_gscale=getattr(layer, "_backport_a2_gscale", None),
             w1_scale=layer.w13_scales,
             w2_scale=layer.w2_scales,
             group_size=self.quant_config.group_size,

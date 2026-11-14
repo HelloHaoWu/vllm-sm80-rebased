@@ -42,9 +42,9 @@ _PINNED_MAPPINGS: dict[int, mmap.mmap] = {}
 
 
 def pin_exact(t: torch.Tensor) -> torch.Tensor:
-    """Return a page-locked copy of ``t`` occupying exactly its own size.
+    """Return a page-locked copy of `t` occupying exactly its own size.
 
-    ``Tensor.pin_memory()`` allocates through torch's ``CachingHostAllocator``,
+    `Tensor.pin_memory()` allocates through torch's `CachingHostAllocator`,
     which rounds every block up to the next power of two. For the large,
     awkwardly-sized tensors weight offloading deals with that is a multiplier,
     not a rounding error: a 2.250 GiB expert block costs 4.008 GiB of pinned
@@ -53,8 +53,8 @@ def pin_exact(t: torch.Tensor) -> torch.Tensor:
     OOM-killed during construction.
 
     An anonymous mmap is page-aligned and exactly sized; registering it with
-    ``cudaHostRegister`` yields page-locked memory with no bucketing. Falls back
-    to ``pin_memory()`` for non-contiguous inputs or if registration fails.
+    `cudaHostRegister` yields page-locked memory with no bucketing. Falls back
+    to `pin_memory()` for non-contiguous inputs or if registration fails.
     """
     nbytes = t.numel() * t.element_size()
     if nbytes == 0 or not t.is_contiguous():
@@ -93,9 +93,9 @@ def release_pinned(ptr: int) -> bool:
     """Unregister and unmap an exact-size pinned buffer created by pin_exact().
 
     Callers that replace an offloaded parameter must call this with the old
-    ``data_ptr()``. ``process_weights_after_loading`` repacks expert weights
+    `data_ptr()`. `process_weights_after_loading` repacks expert weights
     (e.g. for Marlin), so the same logical parameter is offloaded twice; without
-    releasing the first mapping both copies stay resident. ``Tensor.pin_memory()``
+    releasing the first mapping both copies stay resident. `Tensor.pin_memory()`
     gets this for free from its caching allocator, so the exact-size path has to
     recycle explicitly.
     """

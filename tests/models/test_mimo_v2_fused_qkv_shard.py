@@ -2,8 +2,8 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Sharding of MiMo-V2 fused fp8 qkv_proj checkpoints.
 
-The checkpoint stores the fused QKV pre-sharded for ``ckpt_tp`` ranks as
-``[Q_i | K_i | V_i]`` per shard, each shard block-quantized on its own, so
+The checkpoint stores the fused QKV pre-sharded for `ckpt_tp` ranks as
+`[Q_i | K_i | V_i]` per shard, each shard block-quantized on its own, so
 the block tiling restarts at every shard boundary.
 """
 

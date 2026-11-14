@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+import os
+from dataclasses import field
 from typing import TYPE_CHECKING, Self
 
 from pydantic import model_validator
@@ -34,8 +36,12 @@ def model_has_engram_layers(model_config: "ModelConfig | None") -> bool:
 class EngramConfig:
     """Configuration for Engram embedding storage and sharding."""
 
-    cpu_offload: bool = True
-    """Store embedding weights in pinned CPU memory for UVA lookup."""
+    cpu_offload: bool = field(
+        default_factory=lambda: bool(int(os.getenv("VLLM_PLE_CPU_OFFLOAD", "1")))
+    )
+    """Store embedding weights in pinned CPU memory for UVA lookup.
+    Defaults to CPU offload; VLLM_PLE_CPU_OFFLOAD is a legacy explicit override.
+    An explicit cpu_offload field takes precedence over the environment."""
 
     disk_offload: bool = False
     """Keep Qwen4Exp PLE tables in the checkpoint files and read each step's

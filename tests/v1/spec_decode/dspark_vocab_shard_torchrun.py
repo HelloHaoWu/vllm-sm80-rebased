@@ -2,25 +2,25 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """8-rank check of DSpark's vocab-sharded greedy drafting.
 
-Not named ``test_*`` on purpose: it needs a real TP process group, so it is
-launched by ``test_dspark_vocab_shard.py`` as
+Not named `test_*` on purpose: it needs a real TP process group, so it is
+launched by `test_dspark_vocab_shard.py` as
 
     torchrun --nproc_per_node=8 tests/v1/spec_decode/dspark_vocab_shard_torchrun.py
 
 What it covers that a single-process test cannot: the shipped entry point.
-``DSparkSpeculator._sample_sequential`` is driven directly -- the real
-function, on real ``ParallelLMHead``\\ s whose weights went through the real
-vocab-parallel ``weight_loader`` -- and every arm must agree token for token.
+`DSparkSpeculator._sample_sequential` is driven directly -- the real
+function, on real `ParallelLMHead`\\ s whose weights went through the real
+vocab-parallel `weight_loader` -- and every arm must agree token for token.
 The previous iteration of this feature had 31 green unit tests over the
 reduction while the shipped path could not run at all, which is the hole this
 closes.
 
 Four arms, all required to produce the same draft:
 
-  ``replicated``   reduction off: full-vocab Markov bias, replicated markov_w2
-  ``allgather``    reduction on, per-step all_gather of the (value, id) pairs
-  ``allreduce``    reduction on, sum-all_reduce over a zeroed [B, 2*tp] buffer
-  ``fused``        reduction on, the fused Triton Markov step (which uses the
+  `replicated`   reduction off: full-vocab Markov bias, replicated markov_w2
+  `allgather`    reduction on, per-step all_gather of the (value, id) pairs
+  `allreduce`    reduction on, sum-all_reduce over a zeroed [B, 2*tp] buffer
+  `fused`        reduction on, the fused Triton Markov step (which uses the
                    all_reduce exchange internally)
 """
 
@@ -69,8 +69,8 @@ class _StubDSpark(nn.Module):
     """A DSpark draft model reduced to its head, borrowing the shipped methods.
 
     The class attributes are the real function objects from
-    ``Qwen3DSparkForCausalLM``, so this exercises the shipped code rather than
-    a copy of it; only the backbone (which produces ``head_hidden``) is stubbed
+    `Qwen3DSparkForCausalLM`, so this exercises the shipped code rather than
+    a copy of it; only the backbone (which produces `head_hidden`) is stubbed
     out, and the speculator is handed that hidden state directly.
     """
 

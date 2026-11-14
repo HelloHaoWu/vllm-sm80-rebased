@@ -654,6 +654,61 @@ if(VLLM_GPU_LANG STREQUAL "CUDA" OR VLLM_GPU_LANG STREQUAL "HIP")
         CUDA_ARCHS "${COOPERATIVE_TOPK_ARCHS}")
     endif()
 
+    # Isolated FP32 deterministic kernels; main BF16/new Top-K stays intact.
+    cuda_archs_loose_intersection(BACKPORT_TOPK_ARCHS "8.0+PTX" "${CUDA_ARCHS}")
+    if (BACKPORT_TOPK_ARCHS)
+      set(BACKPORT_TOPK_SRC
+        "csrc/backport/topk/topk.cu"
+        "csrc/backport/topk/sampler.cu"
+        "csrc/backport/topk/bindings.cpp")
+      list(APPEND VLLM_STABLE_EXT_SRC ${BACKPORT_TOPK_SRC})
+      set_gencode_flags_for_srcs(SRCS ${BACKPORT_TOPK_SRC}
+        CUDA_ARCHS "${BACKPORT_TOPK_ARCHS}")
+    endif()
+
+    # Legacy W4A8 stays isolated from current W4A16 symbols and schemas.
+    cuda_archs_loose_intersection(BACKPORT_MARLIN_ARCHS "8.0+PTX" "${CUDA_ARCHS}")
+    if (BACKPORT_MARLIN_ARCHS)
+      list(JOIN CUDA_ARCHS "," BACKPORT_MARLIN_ARCHS_STR)
+      foreach(kind marlin marlin_moe)
+        execute_process(COMMAND ${Python_EXECUTABLE}
+          ${CMAKE_CURRENT_SOURCE_DIR}/csrc/backport/${kind}/generate_kernels.py
+          ${BACKPORT_MARLIN_ARCHS_STR}
+          RESULT_VARIABLE BACKPORT_MARLIN_RESULT)
+        if (NOT BACKPORT_MARLIN_RESULT EQUAL 0)
+          message(FATAL_ERROR "Backport ${kind} kernel generation failed")
+        endif()
+        file(GLOB BACKPORT_${kind}_GENERATED "csrc/backport/${kind}/*kernel_*.cu")
+      endforeach()
+      set(BACKPORT_MARLIN_SRC ${BACKPORT_marlin_GENERATED}
+        ${BACKPORT_marlin_moe_GENERATED}
+        "csrc/backport/marlin/marlin.cu"
+        "csrc/backport/marlin/gptq_marlin_repack.cu"
+        "csrc/backport/marlin/awq_marlin_repack.cu"
+        "csrc/backport/marlin/marlin_int4_fp8_preprocess.cu"
+        "csrc/backport/marlin_moe/ops.cu"
+        "csrc/backport/marlin_bindings.cpp")
+      list(APPEND VLLM_STABLE_EXT_SRC ${BACKPORT_MARLIN_SRC})
+      if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8)
+        set_source_files_properties(${BACKPORT_MARLIN_SRC}
+          PROPERTIES COMPILE_FLAGS "-static-global-template-stub=false")
+      endif()
+      set(BACKPORT_MARLIN_GENERIC_SRC ${BACKPORT_MARLIN_SRC})
+      list(FILTER BACKPORT_MARLIN_GENERIC_SRC EXCLUDE REGEX "/sm89_kernel_")
+      set_gencode_flags_for_srcs(SRCS ${BACKPORT_MARLIN_GENERIC_SRC}
+        CUDA_ARCHS "${BACKPORT_MARLIN_ARCHS}")
+      cuda_archs_loose_intersection(BACKPORT_MARLIN_FP8_ARCHS
+        "8.9+PTX;12.0+PTX;12.1" "${CUDA_ARCHS}")
+      file(GLOB BACKPORT_MARLIN_FP8_SRC
+        "csrc/backport/marlin/sm89_kernel_*.cu"
+        "csrc/backport/marlin_moe/sm89_kernel_*.cu")
+      if (BACKPORT_MARLIN_FP8_SRC)
+        set_gencode_flags_for_srcs(SRCS ${BACKPORT_MARLIN_FP8_SRC}
+          CUDA_ARCHS "${BACKPORT_MARLIN_FP8_ARCHS}")
+      endif()
+
+    endif()
+
     # Only build Marlin kernels if we are building for at least some compatible archs.
     # Keep building Marlin for 9.0 as there are some group sizes and shapes that
     # are not supported by Machete yet.

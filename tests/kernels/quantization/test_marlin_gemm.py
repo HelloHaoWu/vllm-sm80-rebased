@@ -490,3 +490,48 @@ def test_marlin_gemm_with_bias(size_m):
     max_diff = compute_max_diff(output, output_ref)
 
     assert max_diff < 0.04
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("group_size", [-1, 128])
+def test_backport_w4a8_int8_quantization_and_gemm(dtype, group_size):
+    """Exercise A8-specific repack/scales and compare to dequantized GEMM."""
+    from vllm.model_executor.layers.quantization.utils import (
+        marlin_ops_legacy,
+        marlin_utils_legacy,
+    )
+
+    torch.manual_seed(7)
+    m, k, n = 8, 256, 128
+    x = torch.randn(m, k, device="cuda", dtype=dtype) * 0.1
+    w = torch.randn(k, n, device="cuda", dtype=dtype) * 0.1
+    w_ref, q_w, scales = gptq_quantize_weights(w, scalar_types.uint4b8, group_size)
+    packed = gptq_pack(q_w, 4, k, n)
+    repacked = marlin_ops_legacy.gptq_marlin_repack(packed, k, n, 4, True)
+    scales = marlin_utils_legacy.marlin_permute_scales(scales, k, n, group_size, True)
+    xq, xs = marlin_utils_legacy.marlin_quant_input(x, torch.int8)
+    reference = (xq.float() * xs.float()) @ w_ref.float()
+    if group_size != -1:
+        scales, global_scale = marlin_utils_legacy.marlin_act_int8_process_scales(
+            scales
+        )
+        xs = xs * global_scale
+    workspace = marlin_make_workspace_new(x.device)
+    out = marlin_ops_legacy.marlin_gemm(
+        xq,
+        None,
+        repacked,
+        None,
+        scales,
+        xs,
+        None,
+        None,
+        workspace,
+        scalar_types.uint4b8,
+        m,
+        n,
+        k,
+        use_fp32_reduce=True,
+    )
+    assert out.dtype == dtype
+    torch.testing.assert_close(out.float(), reference, atol=0.004, rtol=0.01)

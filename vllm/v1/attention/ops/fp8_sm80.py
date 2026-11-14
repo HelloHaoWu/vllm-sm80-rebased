@@ -2,18 +2,18 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """fp8 e4m3fn encode/decode for Triton kernels on pre-SM89 CUDA.
 
-Triton refuses every conversion between ``fp8e4nv`` and other float types
-below SM89 (``bitcast`` is allowed), so these substitute:
+Triton refuses every conversion between `fp8e4nv` and other float types
+below SM89 (`bitcast` is allowed), so these substitute:
 
 - store side: a manual round-to-nearest-even saturating encoder on the fp32
-  bit pattern, bit-exact with ``x.to(tl.float8e4nv)`` /
-  ``torch.Tensor.to(torch.float8_e4m3fn)`` (satfinite semantics).
+  bit pattern, bit-exact with `x.to(tl.float8e4nv)` /
+  `torch.Tensor.to(torch.float8_e4m3fn)` (satfinite semantics).
 - load side: a 256-entry bf16 lookup table. Measured 1.35-1.48x faster than
   an ALU unpack in the sparse-MLA decode kernels -- the table stays in L1
   while the ALU version's live values spill (68 spills vs 6), so prefer it
   wherever a kernel can accept the extra pointer argument.
 
-``USE_FNUZ`` branches stay on the hardware convert: FNUZ only occurs on
+`USE_FNUZ` branches stay on the hardware convert: FNUZ only occurs on
 gfx942, which has it.
 """
 
@@ -53,7 +53,7 @@ def get_e4m3fn_bf16_lut(
 ) -> torch.Tensor:
     """256-entry e4m3fn -> bf16 decode table.
 
-    ``nan_value`` replaces the two NaN encodings (0x7F/0xFF, signed): pass
+    `nan_value` replaces the two NaN encodings (0x7F/0xFF, signed): pass
     a finite magnitude where NaN would poison a downstream reduction (the
     indexer's dot product uses +-480), or leave it None for kernels that
     scrub NaN themselves and need NaN in, NaN out.
@@ -114,7 +114,7 @@ def _f32_to_e4m3fn_u8(x):
 
 @triton.jit
 def _encode_e4m3fn_u8(x):
-    """Drop-in for ``x.to(tl.float8e4nv).to(tl.uint8, bitcast=True)``."""
+    """Drop-in for `x.to(tl.float8e4nv).to(tl.uint8, bitcast=True)`."""
     if _NATIVE_FP8_CAST:
         return x.to(tl.float8e4nv).to(tl.uint8, bitcast=True)
     else:
@@ -134,7 +134,7 @@ def _encode_fp8_u8(x, USE_FNUZ: tl.constexpr):
 def _e4m3fn_to_f32_alu(u):
     """e4m3fn byte -> exact f32 via integer math, NaN preserved.
 
-    For kernels that cannot take a LUT pointer; prefer ``_decode_fp8_lut``.
+    For kernels that cannot take a LUT pointer; prefer `_decode_fp8_lut`.
     """
     u32 = u.to(tl.uint32)
     sign = tl.where((u32 & 0x80) != 0, -1.0, 1.0)
@@ -160,9 +160,9 @@ def _decode_fp8_f32(u, USE_FNUZ: tl.constexpr):
 
 @triton.jit
 def _decode_fp8_lut(u, USE_FNUZ: tl.constexpr, lut_ptr):
-    """FNUZ-aware byte decode; pre-SM89 CUDA reads ``lut_ptr``.
+    """FNUZ-aware byte decode; pre-SM89 CUDA reads `lut_ptr`.
 
-    ``lut_ptr`` must come from :func:`get_e4m3fn_bf16_nan_lut` and is
+    `lut_ptr` must come from `get_e4m3fn_bf16_nan_lut` and is
     ignored (compile-time) wherever the hardware convert exists.
     """
     if USE_FNUZ:

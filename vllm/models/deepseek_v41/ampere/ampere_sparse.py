@@ -6,7 +6,7 @@ Reuses the ROCm Triton sparse-MLA implementation wholesale, exactly like the
 V4 Ampere layer: its kernels, ragged metadata builders and bf16 o_proj
 reference path are plain Triton/torch (the aiter-only preshuffle GEMMs and the
 fused aiter norm+quant self-disable off ROCm), and
-``vllm.v1.attention.ops.fp8_sm80`` supplies e4m3 encode/decode below SM89
+`vllm.v1.attention.ops.fp8_sm80` supplies e4m3 encode/decode below SM89
 where Triton refuses native fp8 converts.
 """
 

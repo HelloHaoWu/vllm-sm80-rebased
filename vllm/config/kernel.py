@@ -171,6 +171,7 @@ MEGA_MOE_BACKENDS = NATIVE_MEGA_MOE_BACKENDS | FLASHINFER_MOE_EP_BACKENDS
 
 SparseIndexerTopkBackend = Literal[
     "auto",
+    "backport",
     "deep_select",
     "cooperative",
     "persistent",
@@ -362,8 +363,10 @@ class KernelConfig:
     sparse_indexer_topk_backend: SparseIndexerTopkBackend = "auto"
     """Backend for the DSA sparse indexer decode top-k kernel. Available options:
 
-    - "auto": The pre-existing chain (cooperative -> persistent -> per_row)
-      on CUDA and per_row on ROCm; the other backends are opt-in
+    - "auto": FP32 on verified SM80 devices uses the deterministic Backport
+      kernels; other devices/dtypes retain cooperative -> persistent -> per_row
+    - "backport": Force deterministic FP32 selection on CUDA SM80+;
+      rejects unsupported dtypes, shapes and missing compiled operators
     - "deep_select": Use DeepSelect kernels (SM100a/SM103a only)
     - "cooperative": Use vLLM's cooperative_topk kernel
     - "persistent": Use vLLM's persistent_topk kernel (CUDA and ROCm)

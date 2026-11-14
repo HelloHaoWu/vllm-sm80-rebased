@@ -415,3 +415,23 @@ def test_get_attr_docs_rejects_non_class():
     untyped callers, so keep asserting the documented TypeError."""
     with pytest.raises(TypeError, match="Given object was not a class."):
         get_attr_docs(object())  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("explicit", [True, False])
+def test_engram_explicit_cpu_offload_overrides_legacy_environment(
+    monkeypatch, explicit
+):
+    """An explicit new configuration must win over an opposite old setting."""
+    from vllm.config.engram import EngramConfig
+
+    monkeypatch.setenv("VLLM_PLE_CPU_OFFLOAD", "0" if explicit else "1")
+    assert EngramConfig(cpu_offload=explicit).cpu_offload is explicit
+
+
+def test_engram_defaults_to_cpu_and_accepts_legacy_override(monkeypatch):
+    from vllm.config.engram import EngramConfig
+
+    monkeypatch.delenv("VLLM_PLE_CPU_OFFLOAD", raising=False)
+    assert EngramConfig().cpu_offload is True
+    monkeypatch.setenv("VLLM_PLE_CPU_OFFLOAD", "0")
+    assert EngramConfig().cpu_offload is False

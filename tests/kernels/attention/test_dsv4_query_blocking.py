@@ -8,15 +8,17 @@ the query positions, because the layers they serve have no indexer and their
 *second* implementation of an index constructor that already exists, so the
 tests here pin the two together, on CPU, without needing a GPU:
 
-* :func:`test_blocked_rows_match_combined_indices` -- the prefill derivation
-  against a transcription of ``_combine_topk_swa_indices_kernel``.
-* :func:`test_blocked_flash_matches_plain_attention` -- the masked/mask-free
+* `test_blocked_rows_match_combined_indices` -- the prefill derivation
+  against a transcription of `_combine_topk_swa_indices_kernel`.
+* `test_blocked_flash_matches_plain_attention` -- the masked/mask-free
   tile loop against plain softmax attention.
-* :func:`test_decode_union_reproduces_each_query_list` -- the decode
-  derivation, which reconstructs a group's index lists from ``indptr`` alone.
+* `test_decode_union_reproduces_each_query_list` -- the decode
+  derivation, which reconstructs a group's index lists from `indptr` alone.
 * the gating tests -- every condition that must send a layer back to the
   per-query kernel.
 """
+
+from typing import Any
 
 import pytest
 import torch
@@ -47,11 +49,11 @@ def combined_rows(
     batch: int,
     gather_start: int,
 ) -> list[int]:
-    """The rows ``_combine_topk_swa_indices_kernel`` writes for one query.
+    """The rows `_combine_topk_swa_indices_kernel` writes for one query.
 
-    Transcribed from ``vllm/models/deepseek_v4/amd/rocm.py`` (the compressed
+    Transcribed from `vllm/models/deepseek_v4/amd/rocm.py` (the compressed
     half of which is itself the identity prefix that
-    ``sparse_mla.py::_build_c128a_topk_metadata_kernel`` stores). Kept as a
+    `sparse_mla.py::_build_c128a_topk_metadata_kernel` stores). Kept as a
     separate transcription on purpose: if either constructor moves, this test
     fails rather than following it.
     """
@@ -64,7 +66,7 @@ def combined_rows(
 
 
 def blocked_geometry(positions: torch.Tensor, top_k: int) -> dict[str, torch.Tensor]:
-    """The per-block geometry ``_sparse_attn_prefill_blocked_kernel`` derives."""
+    """The per-block geometry `_sparse_attn_prefill_blocked_kernel` derives."""
     topk_len = torch.clamp((positions + 1) // COMPRESS_RATIO, max=top_k)
     swa_len = torch.clamp(positions + 1, max=WINDOW_SIZE)
     swa_start = positions + 1 - swa_len
@@ -210,7 +212,7 @@ def test_blocked_flash_matches_plain_attention(
 ) -> None:
     """The tiled loop, masks and all, equals softmax over each query's own rows.
 
-    ``start_pos=0`` is the case that made the mask on ``p`` load-bearing: the
+    `start_pos=0` is the case that made the mask on `p` load-bearing: the
     first query of a request has an empty compressed prefix while a later one
     in the same block does not, so its whole first tile is masked and its
     running max is still -inf.
@@ -237,10 +239,10 @@ def test_blocked_flash_matches_plain_attention(
 
 def decode_group_geometry(
     main_lens: list[int], extra_lens: list[int]
-) -> dict[str, int | list[int]]:
-    """The union geometry ``_sparse_attn_decode_partial_blocked_kernel`` derives.
+) -> dict[str, Any]:
+    """The union geometry `_sparse_attn_decode_partial_blocked_kernel` derives.
 
-    Everything comes from the per-query segment lengths, i.e. from ``indptr``:
+    Everything comes from the per-query segment lengths, i.e. from `indptr`:
     the compressed lists nest, and the windows slide by one position per query.
     """
     group = len(main_lens)
@@ -484,12 +486,12 @@ def test_blocked_decode_kernel_matches_the_per_query_kernel(
 ) -> None:
     """Same ragged buffers into both partial kernels, same reduce after them.
 
-    The blocked kernel derives its union from ``indptr``, so feeding both the
+    The blocked kernel derives its union from `indptr`, so feeding both the
     identical index lists is what makes this a test of that derivation.
 
-    ``group=6`` runs on an 8-row tile with two padding rows, which is what
-    production does at ``next_n=6``: ``BLOCK_M`` indexes a ``tl.arange`` and
-    must be a power of two, while ``group_size`` is the real query count.
+    `group=6` runs on an 8-row tile with two padding rows, which is what
+    production does at `next_n=6`: `BLOCK_M` indexes a `tl.arange` and
+    must be a power of two, while `group_size` is the real query count.
     """
     smem = torch.cuda.get_device_properties(0).shared_memory_per_block_optin
     block_m = 1 << (group - 1).bit_length()
@@ -568,6 +570,7 @@ def test_blocked_decode_kernel_matches_the_per_query_kernel(
             if blocked
             else _sparse_attn_decode_partial_kernel
         )
+        assert kernel is not None
         extra = {"BLOCK_M": _next_pow2(group)} if blocked else {}
         kernel[((batch if blocked else num_queries), num_splits, heads // block_h)](
             q, cache, main_indices, main_indptr, cache, extra_indices, extra_indptr,
@@ -625,8 +628,14 @@ def test_decode_block_tile_declines_what_the_kernel_cannot_serve(
 
 def test_uniform_group_size_gates_the_decode_block() -> None:
     try:
-        from vllm.models.deepseek_v4.amd.rocm import uniform_decode_group_size
-    except ImportError:
+        from vllm.models.deepseek_v4.amd import rocm
+
+        uniform_decode_group_size: Any = getattr(
+            rocm, "uniform_decode_group_size", None
+        )
+        if uniform_decode_group_size is None:
+            raise ImportError(_BLOCKED_DECODE_UNAVAILABLE)
+    except (ImportError, AttributeError):
         pytest.skip(_BLOCKED_DECODE_UNAVAILABLE)
     uniform = torch.tensor([0, 6, 12, 18], dtype=torch.int32)
     assert uniform_decode_group_size(True, 3, 18, uniform) == 6

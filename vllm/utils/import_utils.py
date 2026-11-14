@@ -674,9 +674,9 @@ def has_cutedsl() -> bool:
 def is_cutedsl_supported() -> bool:
     """Whether CuTe DSL is installed *and* can compile for this device.
 
-    Mirrors ``is_deep_gemm_supported()``: the kernels target SM90+, and
+    Mirrors `is_deep_gemm_supported()`: the kernels target SM90+, and
     compiling them for an older arch aborts the process, so package
-    presence alone (``has_cutedsl()``) is not a usable dispatch gate.
+    presence alone (`has_cutedsl()`) is not a usable dispatch gate.
     """
     from vllm.platforms import current_platform
 

@@ -11,6 +11,7 @@ whatever the production heuristic picks.
 Examples:
     python benchmarks/kernels/benchmark_dsv4_sm80.py --kernel sparse-decode
     python benchmarks/kernels/benchmark_dsv4_sm80.py --kernel all
+
 """
 
 import argparse
@@ -139,12 +140,12 @@ def _ragged_indices(
     device: torch.device,
     live_rows: int = 0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Ragged (indices, indptr) with ``seg_len`` slots per query.
+    """Ragged (indices, indptr) with `seg_len` slots per query.
 
-    ``scattered`` models the compressed top-k gather (random rows); contiguous
+    `scattered` models the compressed top-k gather (random rows); contiguous
     models the SWA window.
 
-    ``live_rows`` separates *how much data the sequence owns* from *how far
+    `live_rows` separates *how much data the sequence owns* from *how far
     apart it sits*. Serving gathers ctx/compress_ratio rows out of a cache pool
     two orders of magnitude larger, in `block_size`-row pages handed out by a
     free list, so the bytes are L2-sized while the addresses are not. Passing
@@ -187,7 +188,7 @@ def _ragged_indices(
 
 
 def _decode_operating_point(ctx: int, compress_ratio: int = 4) -> dict:
-    """Segment lengths and gather-pool size for a decode step at ``ctx`` tokens.
+    """Segment lengths and gather-pool size for a decode step at `ctx` tokens.
 
     Every quantity here follows from the context length, which is the point:
     a fixed pool measures one spot on a context-dependent curve, and a
@@ -196,7 +197,7 @@ def _decode_operating_point(ctx: int, compress_ratio: int = 4) -> dict:
     bench cannot guide tuning in either direction until the operating point is
     an input.
 
-    ``topk_len``/``swa_len`` are the *true* walked lengths, which is what the
+    `topk_len`/`swa_len` are the *true* walked lengths, which is what the
     kernel does via indptr. They are NOT what production's split heuristic
     sees -- see `bench_sparse_decode`.
     """
@@ -226,7 +227,7 @@ def _decode_inputs(
     see `rocm_sparse_attn_decode`, which passes `main_cache=swa_k_cache,
     main_lengths=swa_lens` and `extra_cache=kv_cache, extra_lengths=topk_lens`.
 
-    ``topk_rows`` is the row count the scattered gather indexes into, and it
+    `topk_rows` is the row count the scattered gather indexes into, and it
     is the single most misleading knob here. It used to be hardcoded at
     128*1024 rows = 76.6 MB of fp8_ds_mla cache against an A100's 40 MB L2,
     so every measurement was taken in a DRAM-bound regime the server never
@@ -525,19 +526,19 @@ def _prefill_inputs(
 ) -> dict:
     """One chunk of ragged sparse prefill.
 
-    ``index_mode`` picks which of the two layer populations the indices come
+    `index_mode` picks which of the two layer populations the indices come
     from, and it is not a cosmetic knob -- it decides whether adjacent queries
     share rows, which is the whole property a query-blocked kernel would
     exploit:
 
-    ``topk`` (the 21 ratio-4 layers): every query gathers ``kv_len``
-    scattered rows out of a ``ctx``-row pool. Those layers' top-k sets are
+    `topk` (the 21 ratio-4 layers): every query gathers `kv_len`
+    scattered rows out of a `ctx`-row pool. Those layers' top-k sets are
     genuine per-query selections, so scattered indices are faithful.
 
-    ``prefix`` (the 20 ratio-128 layers): the index list is not a selection at
-    all -- ``sparse_mla.py`` builds it positionally as ``(pos+1)//128``, the
+    `prefix` (the 20 ratio-128 layers): the index list is not a selection at
+    all -- `sparse_mla.py` builds it positionally as `(pos+1)//128`, the
     identity prefix of the compressed cache. Adjacent queries then share all
-    but at most one row. ``torch.randint`` destroys exactly that sharing,
+    but at most one row. `torch.randint` destroys exactly that sharing,
     which is why R3 S3.2's standalone bench predicted 485 ms/chunk against a
     traced 315 ms and why its absolute rates were not quotable.
     """
@@ -734,7 +735,7 @@ C128_MAX_MODEL_LEN = 262_144
 
 
 def _c128_prefill_inputs(m_tokens: int, depth: int, device: torch.device) -> dict:
-    """One ratio-128 prefill chunk of a single request at context ``depth``.
+    """One ratio-128 prefill chunk of a single request at context `depth`.
 
     Mirrors what `_forward_prefill` hands the kernel: a `[row_stride, 512]`
     bf16 workspace holding the dequantized compressed rows at `[0, n_rows)`
@@ -1745,7 +1746,7 @@ def _paged_logits_inputs(
     """Decode inputs for `_fp8_paged_mqa_logits_kernel`, laid out exactly as
     `fp8_paged_mqa_logits_triton` re-derives them from the paged cache.
 
-    ``next_n`` is the DSpark draft length: production runs 6 (5 speculative
+    `next_n` is the DSpark draft length: production runs 6 (5 speculative
     tokens plus the bonus), and the grid's first dimension is B * next_n, so
     the harness's old hardcoded 1 measured a grid 6x smaller than serving's
     at the same batch (canon rule 7).
@@ -2637,7 +2638,7 @@ def bench_dense_gemv(ms: list[int], block_ns: list[int], device: torch.device) -
     rows = []
     # Best us per (arm, shape) for the per-step summary.
     step_us: dict[str, dict[str, float]] = {}
-    for name, k, n, count in _DENSE_GEMM_SHAPES:
+    for name, k, n, _count in _DENSE_GEMM_SHAPES:
         w = torch.randn(n, k, dtype=torch.bfloat16, device=device) * 0.02
         w_fp8, scales = _fp8_block_quant(w)
         w_dq = _fp8_block_dequant(w_fp8, scales)

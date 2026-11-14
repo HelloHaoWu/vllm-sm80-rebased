@@ -11,48 +11,6 @@ from vllm.triton_utils import triton
 from vllm.utils.math_utils import round_up
 
 
-@overload
-def moe_align_block_size(
-    topk_ids: torch.Tensor,
-    block_size: int,
-    num_experts: int,
-    expert_map: torch.Tensor | None = None,
-    pad_sorted_ids: bool = False,
-    ignore_invalid_experts: bool = False,
-    *,
-    return_scatter_idx: Literal[False] = False,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]: ...
-
-
-@overload
-def moe_align_block_size(
-    topk_ids: torch.Tensor,
-    block_size: int,
-    num_experts: int,
-    expert_map: torch.Tensor | None = None,
-    pad_sorted_ids: bool = False,
-    ignore_invalid_experts: bool = False,
-    *,
-    return_scatter_idx: Literal[True],
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]: ...
-
-
-@overload
-def moe_align_block_size(
-    topk_ids: torch.Tensor,
-    block_size: int,
-    num_experts: int,
-    expert_map: torch.Tensor | None = None,
-    pad_sorted_ids: bool = False,
-    ignore_invalid_experts: bool = False,
-    *,
-    return_scatter_idx: bool,
-) -> (
-    tuple[torch.Tensor, torch.Tensor, torch.Tensor]
-    | tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
-): ...
-
-
 def _moe_align_block_size_deterministic(
     topk_ids: torch.Tensor,
     num_experts: int,
@@ -142,6 +100,48 @@ def _moe_align_block_size_deterministic(
     if scatter_idx is not None:
         rows = torch.arange(numel, dtype=torch.int32, device=topk_ids.device)
         scatter_idx.copy_(torch.where(valid, rows, -1).view(-1, 1))
+
+
+@overload
+def moe_align_block_size(
+    topk_ids: torch.Tensor,
+    block_size: int,
+    num_experts: int,
+    expert_map: torch.Tensor | None = None,
+    pad_sorted_ids: bool = False,
+    ignore_invalid_experts: bool = False,
+    *,
+    return_scatter_idx: Literal[False] = False,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]: ...
+
+
+@overload
+def moe_align_block_size(
+    topk_ids: torch.Tensor,
+    block_size: int,
+    num_experts: int,
+    expert_map: torch.Tensor | None = None,
+    pad_sorted_ids: bool = False,
+    ignore_invalid_experts: bool = False,
+    *,
+    return_scatter_idx: Literal[True],
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]: ...
+
+
+@overload
+def moe_align_block_size(
+    topk_ids: torch.Tensor,
+    block_size: int,
+    num_experts: int,
+    expert_map: torch.Tensor | None = None,
+    pad_sorted_ids: bool = False,
+    ignore_invalid_experts: bool = False,
+    *,
+    return_scatter_idx: bool,
+) -> (
+    tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+    | tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+): ...
 
 
 def moe_align_block_size(

@@ -2,8 +2,8 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Fused vocab-sharded Markov step for DSpark's sequential drafting.
 
-One draft position of ``DSparkSpeculator._sample_sequential`` under
-``use_local_argmax_reduction`` is, in eager PyTorch::
+One draft position of `DSparkSpeculator._sample_sequential` under
+`use_local_argmax_reduction` is, in eager PyTorch::
 
     markov_embed = markov_w1(prev)  # [B, r]
     logits = F.linear(markov_embed, markov_w2.weight)  # [B, N]  N = shard width
@@ -14,11 +14,11 @@ One draft position of ``DSparkSpeculator._sample_sequential`` under
     gathered = all_gather(pair)  # [B, 2 * tp]
     prev = reduce_global_argmax(...)  # [B]
 
-Seven kernels and three round-trips of the ``[B, N]`` row through HBM, five
+Seven kernels and three round-trips of the `[B, N]` row through HBM, five
 times in sequence, all inside the captured draft graph. The row is never
 *read* by anything but the argmax, so it never has to exist: this module fuses
 the embedding lookup, the GEMV, the base-logit add, the padding mask and the
-argmax into a single pass over ``markov_w2`` that emits only a (value, global
+argmax into a single pass over `markov_w2` that emits only a (value, global
 id) pair per request.
 
 Three kernels per step, not one: the argmax spans the whole shard, so the
@@ -42,14 +42,14 @@ block-level and grid-level reductions are plain integer maxima::
 
     packed = monotone_i32(value) << 32 | (INT32_MAX - shard_local_index)
 
-``monotone_i32`` is the standard order-preserving float-to-int map (flip the
+`monotone_i32` is the standard order-preserving float-to-int map (flip the
 magnitude bits of negatives), so integer order matches float order. The index
 is stored complemented, which makes a *larger* packed word mean a *smaller*
 index, so the integer max resolves ties to the lowest index -- the same rule
-:func:`reduce_global_argmax` applies across shards, and the one that matches a
-replicated ``argmax`` over the concatenated vocab. NaNs are mapped to a
+`reduce_global_argmax` applies across shards, and the one that matches a
+replicated `argmax` over the concatenated vocab. NaNs are mapped to a
 canonical positive-NaN key above +inf so that a NaN wins its row the way
-``torch.max`` propagates one; :func:`reduce_global_argmax`'s NaN fallback then
+`torch.max` propagates one; `reduce_global_argmax`'s NaN fallback then
 sees the same input it would have seen from the eager path.
 """
 
@@ -251,9 +251,9 @@ def _markov_finalize(
 class MarkovFusionOperands:
     """The tensors and shard geometry the fused kernels need.
 
-    Produced by the draft model (see ``DSparkMarkovHead.fusion_operands``) so
+    Produced by the draft model (see `DSparkMarkovHead.fusion_operands`) so
     the speculator does not reach into module internals, and so a head whose
-    layout the kernels do not cover can decline by returning ``None``.
+    layout the kernels do not cover can decline by returning `None`.
     """
 
     w1: torch.Tensor  # [target_vocab, R]
@@ -267,7 +267,7 @@ class MarkovFusionOperands:
 def _pick_block_n(shard_width: int, num_sms: int) -> int:
     """Block width for the GEMV pass.
 
-    The pass is bandwidth-bound on ``markov_w2`` (8.27 MB at TP=8 for the
+    The pass is bandwidth-bound on `markov_w2` (8.27 MB at TP=8 for the
     DeepSeek-V4-Flash shard), so the only thing that matters is filling the
     device: pick the largest block that still leaves at least two waves of
     CTAs, and never go below 32 (narrower blocks stop coalescing the row).
@@ -337,10 +337,10 @@ class FusedMarkovSampler:
         anchor_ids: torch.Tensor,
         draft_tokens: torch.Tensor,
     ) -> None:
-        """Run all ``n_spec`` Markov steps, filling ``draft_tokens[:num_reqs]``.
+        """Run all `n_spec` Markov steps, filling `draft_tokens[:num_reqs]`.
 
-        ``base_logits`` is ``[num_reqs, n_spec, shard_width]`` and
-        ``anchor_ids`` the ``[num_reqs]`` bonus tokens the chain starts from.
+        `base_logits` is `[num_reqs, n_spec, shard_width]` and
+        `anchor_ids` the `[num_reqs]` bonus tokens the chain starts from.
         """
         op = self.op
         assert base_logits.stride(-1) == 1
@@ -410,7 +410,7 @@ def build_fused_markov_sampler(
     n_spec: int,
     device: torch.device,
 ) -> FusedMarkovSampler | None:
-    """Build the fused sampler, or ``None`` if this model is not covered.
+    """Build the fused sampler, or `None` if this model is not covered.
 
     Declining is always safe -- the caller keeps the eager chain -- but it is
     logged, because a silent fallback is how a "measured" optimization stops

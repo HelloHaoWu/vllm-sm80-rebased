@@ -402,6 +402,8 @@ class MoeWNA16Method(FusedMoEMethodBase):
 
         has_zp = self.quant_config.has_zp
         return make_wna16_moe_quant_config(
+            a1_gscale=getattr(layer, "_backport_a1_gscale", None),
+            a2_gscale=getattr(layer, "_backport_a2_gscale", None),
             w1_scale=layer.w13_scales,
             w2_scale=layer.w2_scales,
             w1_zp=layer.w13_qzeros if has_zp else None,

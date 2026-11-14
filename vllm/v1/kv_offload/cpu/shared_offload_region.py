@@ -410,6 +410,7 @@ class SharedOffloadRegion:
             single = len(self._segments) == 1
             self.mmap_obj: mmap.mmap | None = None
             if single:
+                assert self.fd is not None
                 self.mmap_obj = mmap.mmap(
                     self.fd,
                     self.total_size_bytes,
@@ -417,7 +418,7 @@ class SharedOffloadRegion:
                     prot=mmap.PROT_READ | mmap.PROT_WRITE,
                 )
             else:
-                reservation = os.memfd_create("vllm_offload_reservation")
+                reservation = _memfd_create("vllm_offload_reservation")
                 try:
                     os.ftruncate(reservation, self.total_size_bytes)
                     self.mmap_obj = mmap.mmap(

@@ -65,8 +65,8 @@ def _tilelang_hc_prenorm_gemm(
 ) -> None:
     """Route the prenorm GEMM.
 
-    ``sqrsum_ready`` says the caller already filled ``sqrsum``; only the cuBLAS
-    route, where the reduction is a separate pass over ``x``, can act on it.
+    `sqrsum_ready` says the caller already filled `sqrsum`; only the cuBLAS
+    route, where the reduction is a separate pass over `x`, can act on it.
     The other routes produce the same values as a side effect of work they do
     anyway, so they ignore the flag and overwrite.
     """
@@ -164,7 +164,7 @@ def _backport_mhc_fused_post_pre_tilelang(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Run one MHC post block followed by the next MHC pre block.
 
-    When ``norm_weight`` is provided, the layer_input_cur output is the
+    When `norm_weight` is provided, the layer_input_cur output is the
     RMSNorm'd activation (fused into the kernel); otherwise it is the
     raw pre-norm activation as before.
 
@@ -307,31 +307,24 @@ def _backport_mhc_fused_post_pre_tilelang(
     else:
         residual_cur_2d = residual_cur.view(num_tokens, hc_mult * hidden_size)
         fuse_sqrsum = envs.VLLM_MHC_POST_FUSE_SQRSUM and not use_deep_gemm
+        # The fork exposed this opt-in flag without shipping its fused kernel.
+        # Keep the supported post kernel and compute the same reduction below.
         if fuse_sqrsum:
-            from vllm.model_executor.kernels.mhc.tilelang_kernels import (
-                mhc_post_sqrsum_tilelang,
-            )
+            from vllm.logger import init_logger
 
-            mhc_post_sqrsum_tilelang(
-                comb_res_mix_flat,
-                residual_flat,
-                post_layer_mix_flat,
-                x_flat,
-                residual_cur,
-                gemm_out_sqrsum,
-                residual.shape[-2],
-                residual.shape[-1],
+            init_logger(__name__).warning_once(
+                "Fused mHC post/sqrsum is unavailable; using the separate reduction"
             )
-        else:
-            mhc_post_tilelang(
-                comb_res_mix_flat,
-                residual_flat,
-                post_layer_mix_flat,
-                x_flat,
-                residual_cur,
-                residual.shape[-2],
-                residual.shape[-1],
-            )
+        fuse_sqrsum = False
+        mhc_post_tilelang(
+            comb_res_mix_flat,
+            residual_flat,
+            post_layer_mix_flat,
+            x_flat,
+            residual_cur,
+            residual.shape[-2],
+            residual.shape[-1],
+        )
 
         if use_deep_gemm:
             from vllm.utils.deep_gemm import tf32_hc_prenorm_gemm

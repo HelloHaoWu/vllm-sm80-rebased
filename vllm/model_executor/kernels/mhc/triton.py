@@ -112,7 +112,7 @@ def _row_sqrsum_kernel(
 def _prenorm_shard_rows(num_rows: int, tp_size: int) -> list[int] | None:
     """Row counts per TP rank, or None if this shape should stay replicated.
 
-    Sizes are returned rather than assumed even so ``all_gatherv`` can
+    Sizes are returned rather than assumed even so `all_gatherv` can
     reassemble any token count without a padding row -- there is then nothing
     written-but-unread that could reach the sinkhorn.
     """
@@ -132,19 +132,19 @@ def hc_prenorm_gemm_cublas(
 ) -> None:
     """Prenorm GEMM as cuBLAS bf16 plus a companion sqrsum reduction.
 
-    The tilelang prenorm kernels re-read ``fn`` from every token tile, which
-    makes them L2-bound at large T; here cuBLAS reads ``x`` once for the GEMM
-    and ``_row_sqrsum_kernel`` reads it a second time — two passes total
+    The tilelang prenorm kernels re-read `fn` from every token tile, which
+    makes them L2-bound at large T; here cuBLAS reads `x` once for the GEMM
+    and `_row_sqrsum_kernel` reads it a second time — two passes total
     instead of the fused kernel's fn re-reads.
 
-    Numerics: ``fn`` is rounded to bf16 (~3 mantissa bits below the fp32/tf32
+    Numerics: `fn` is rounded to bf16 (~3 mantissa bits below the fp32/tf32
     reference) and the GEMM result is rounded to bf16 before the fp32 upcast
-    into ``out`` (cuBLAS will not emit fp32 from bf16 inputs via torch.mm).
+    into `out` (cuBLAS will not emit fp32 from bf16 inputs via torch.mm).
     The parity test in tests/kernels/test_mhc_kernels.py bounds both.
 
-    ``sqrsum`` may be None when the caller has already produced it -- the
-    kernel that writes ``x`` can accumulate the same reduction for free, which
-    saves re-reading ``x`` a second time.
+    `sqrsum` may be None when the caller has already produced it -- the
+    kernel that writes `x` can accumulate the same reduction for free, which
+    saves re-reading `x` a second time.
     """
     assert out.shape[0] == 1
     fn_bf16 = getattr(fn, "_hc_prenorm_bf16", None)
@@ -193,7 +193,8 @@ def hc_prenorm_gemm_cublas(
     # only the work is divided and nothing is scattered first. The gather
     # carries the 24-wide output rather than the 16384-wide input, which is
     # the entire reason this pays.
-    start = sum(rows[: tp.rank_in_group])
+    assert tp is not None
+    start = sum(rows[: tp.rank_in_group], 0)
     x_shard = x[start : start + rows[tp.rank_in_group]]
     out[0].copy_(tp.all_gatherv(x_shard @ fn_bf16.t(), dim=0, sizes=rows))
 

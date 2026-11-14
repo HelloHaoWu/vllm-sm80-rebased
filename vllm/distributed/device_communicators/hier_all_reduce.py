@@ -476,8 +476,8 @@ class HierarchicalAllReduce:
 
         rt = _get_cudart()
         _check(rt.cudaSetDevice(ctypes.c_int(device.index)), "cudaSetDevice")
-        self._own = []
-        self._opened = []
+        self._own: list[int] = []
+        self._opened: list[int] = []
         # data slots (bf16), partial slots (fp32) — double-buffered; flags
         # [phase(2) x writer(world)] int32
         data_ptr = self._alloc(rt, 2 * _MAX_ELEMS * 2)
@@ -498,6 +498,7 @@ class HierarchicalAllReduce:
         ptr = ctypes.c_void_p()
         _check(rt.cudaMalloc(ctypes.byref(ptr), nbytes), "cudaMalloc")
         _check(rt.cudaMemset(ptr, 0, nbytes), "cudaMemset")
+        assert ptr.value is not None
         self._own.append(ptr.value)
         return ptr.value
 
@@ -524,6 +525,7 @@ class HierarchicalAllReduce:
                 rt.cudaIpcOpenMemHandle(ctypes.byref(peer_ptr), h, ctypes.c_uint(1)),
                 "cudaIpcOpenMemHandle",
             )
+            assert peer_ptr.value is not None
             self._opened.append(peer_ptr.value)
             ptrs[rank] = peer_ptr.value
         return ptrs

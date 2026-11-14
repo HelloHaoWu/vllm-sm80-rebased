@@ -230,7 +230,9 @@ def test_fused_indexer_q_rope_quant_matches_unfused(
     if output_buffers is not None:
         # Caller-provided buffers are written in place (input-GEMM fusion
         # hands the kernel slices of a preallocated batch buffer).
-        q_fused_first = q_quant_fused[0] if use_fp4 else q_quant_fused
+        q_fused_first = (
+            q_quant_fused[0] if isinstance(q_quant_fused, tuple) else q_quant_fused
+        )
         assert q_fused_first.data_ptr() == output_buffers[0].data_ptr()
 
     if use_fp4:

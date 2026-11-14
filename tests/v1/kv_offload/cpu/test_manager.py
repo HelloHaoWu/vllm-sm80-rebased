@@ -2401,3 +2401,31 @@ def test_store_trigger_and_success_are_keyword_only():
             keys, _EMPTY_REQ_CTX, StoreTrigger.ON_COMPUTE
         )
     manager.complete_store(keys, _EMPTY_REQ_CTX, trigger=StoreTrigger.ON_COMPUTE)
+
+
+@pytest.mark.parametrize("policy", ["lru", "arc"])
+def test_lookup_reservation_hands_off_to_load_without_allowing_eviction(policy):
+    """Releasing the lookup pin must preserve the load's independent pin."""
+    manager = make_cpu_manager(num_chunks=1, cache_policy=policy)
+    writer = make_req_context("writer")
+    reader = make_req_context("reader")
+    contender = make_req_context("contender")
+    first, second = to_keys([1]), to_keys([2])
+    assert manager.prepare_store(first, writer, trigger=StoreTrigger.ON_COMPUTE)
+    manager.complete_store(first, writer, trigger=StoreTrigger.ON_COMPUTE)
+    assert manager.lookup(first[0], reader) is LookupResult.HIT
+    reserved = manager.reserve_hits(first, reader)
+    assert reserved == first
+    assert (
+        manager.prepare_store(second, contender, trigger=StoreTrigger.ON_COMPUTE)
+        is None
+    )
+    manager.prepare_load(first, reader)
+    manager.release_reservation(reserved, reader)
+    assert (
+        manager.prepare_store(second, contender, trigger=StoreTrigger.ON_COMPUTE)
+        is None
+    )
+    manager.complete_load(first, reader)
+    assert manager.prepare_store(second, contender, trigger=StoreTrigger.ON_COMPUTE)
+    assert manager.lookup(first[0], reader) is LookupResult.MISS

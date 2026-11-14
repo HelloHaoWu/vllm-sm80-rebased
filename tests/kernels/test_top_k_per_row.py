@@ -3116,7 +3116,12 @@ def test_sparse_indexer_resolved_persistent_bf16(
         if backend == "auto" and rows <= 64 and _has_cooperative_topk()
         else "persistent"
     )
-    assert selector.resolve_backend(fp32, k, rows) == resolved
+    expected_fp32 = (
+        "backport"
+        if backend == "auto" and current_platform.is_device_capability(80)
+        else resolved
+    )
+    assert selector.resolve_backend(fp32, k, rows) == expected_fp32
     takes_bf16 = selector.takes_bf16_logits(logits, k, rows)
     assert takes_bf16 == (
         resolved == "cooperative" or current_platform.is_device_capability_family(100)
@@ -3199,3 +3204,52 @@ def test_topk_between_k_and_2k(backend: str, num_rows: int, top_k: int) -> None:
         validate_topk_against_reference(
             logits, indices, row_starts, row_ends, top_k, f"{backend} (n={length})"
         )
+
+
+@pytest.mark.skipif(not current_platform.is_cuda(), reason="Backport CUDA kernels")
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
+def test_backport_dispatch_uses_real_hardware_and_preserves_dtype(dtype):
+    """Auto selects old FP32 only on SM80; BF16 keeps an upstream path."""
+    from vllm.model_executor.layers.indexer_topk import SparseIndexerTopk
+
+    logits = torch.randn(2, 4096, device="cuda", dtype=dtype)
+    topk = SparseIndexerTopk("auto")
+    backend = topk.resolve_backend(logits, 512, 2)
+    capability = current_platform.get_device_capability()
+    assert capability is not None
+    if capability.to_int() == 80 and dtype == torch.float32:
+        assert backend == "backport"
+    else:
+        assert backend != "backport"
+    assert logits.dtype == dtype
+    if dtype == torch.bfloat16:
+        with pytest.raises(RuntimeError, match="FP32"):
+            SparseIndexerTopk("backport").resolve_backend(logits, 512, 2)
+
+
+@pytest.mark.skipif(not current_platform.is_cuda(), reason="Backport CUDA kernels")
+def test_backport_prefill_graph_replay_reads_updated_input():
+    """Captured selection must use current scores and clear short rows."""
+    from vllm.model_executor.layers.indexer_topk import SparseIndexerTopk
+
+    torch.manual_seed(7)
+    scores = torch.randn(2, 8192, device="cuda")
+    starts = torch.tensor([0, 64], device="cuda", dtype=torch.int32)
+    ends = torch.tensor([8192, 8192], device="cuda", dtype=torch.int32)
+    out = torch.empty(2, 512, device="cuda", dtype=torch.int32)
+    topk = SparseIndexerTopk("backport")
+    stream = torch.cuda.Stream()
+    stream.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(stream):
+        topk.forward_prefill(scores, starts, ends, out, 512)
+    torch.cuda.current_stream().wait_stream(stream)
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph, stream=stream):
+        topk.forward_prefill(scores, starts, ends, out, 512)
+    scores.copy_(torch.arange(8192, device="cuda").expand(2, -1))
+    ends.copy_(torch.tensor([8192, 128], device="cuda", dtype=torch.int32))
+    graph.replay()
+    assert set(out[0].tolist()) == set(range(8192 - 512, 8192))
+    selected = out[1][out[1] >= 0]
+    assert set(selected.tolist()) == set(range(64))
+    assert (out[1] == -1).sum().item() == 512 - 64

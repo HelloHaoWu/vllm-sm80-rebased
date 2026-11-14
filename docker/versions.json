@@ -76,6 +76,12 @@
     "RUN_WHEEL_CHECK": {
       "default": "true"
     },
+    "LMCACHE_REPO": {
+      "default": "https://github.com/wtdcode/LMCache.git"
+    },
+    "LMCACHE_REF": {
+      "default": "2acb7b24bea5ac55c5dfc6a41366099236ec525c"
+    },
     "GDRCOPY_CUDA_VERSION": {
       "default": "12.8"
     },
@@ -90,6 +96,9 @@
     },
     "GGUF_VERSION": {
       "default": ">=0.19.0"
+    },
+    "INSTALL_LMCACHE": {
+      "default": "false"
     }
   }
 }

@@ -1192,51 +1192,33 @@ def test_sparse_attn_decode_scrubs_untrusted_cache_by_default() -> None:
     assert torch.equal(actual, torch.zeros_like(actual))
 
 
-@pytest.mark.parametrize("on_gfx950", [False, True])
 @torch.inference_mode()
-def test_rocm_ragged_graph_buffer_view_tracks_source_width(
-    monkeypatch, on_gfx950: bool
-) -> None:
-    from vllm.models.deepseek_v4.amd import rocm as rocm_mod
+def test_rocm_ragged_graph_buffer_view_tracks_source_width() -> None:
+    from vllm.models.deepseek_v4.amd.rocm import _build_ragged_into_graph_buffers
 
-    monkeypatch.setattr(rocm_mod, "_ON_GFX950", on_gfx950)
-
-    indices_buffer = torch.full((16,), -1, dtype=torch.int32)
-    indptr_buffer = torch.full((3,), -1, dtype=torch.int32)
-    first_indices = torch.tensor([3, 5, 7], dtype=torch.int32)
-    first_indptr = torch.tensor([0, 1, 3], dtype=torch.int32)
-    first_view, first_indptr_view = rocm_mod._copy_ragged_to_graph_buffers(
-        first_indices,
-        first_indptr,
-        indices_buffer,
-        indptr_buffer,
-        num_rows=2,
-        max_entries_per_row=8,
+    device = torch.device("cuda")
+    indices_buffer = torch.full((16,), -1, dtype=torch.int32, device=device)
+    indptr_buffer = torch.full((3,), -1, dtype=torch.int32, device=device)
+    views = []
+    for dense in [[[3, -1, -1], [5, 7, -1]], [[1, 2, 3], [4, 5, 6]]]:
+        dense_tensor = torch.tensor(dense, dtype=torch.int32, device=device)
+        lengths = torch.full((2,), 3, dtype=torch.int32, device=device)
+        view, indptr = _build_ragged_into_graph_buffers(
+            dense_tensor,
+            lengths,
+            indices_buffer,
+            indptr_buffer,
+            num_rows=2,
+            max_entries_per_row=8,
+        )
+        views.append(view)
+        assert view.numel() == 16
+        assert view.data_ptr() == indices_buffer.data_ptr()
+        assert indptr.data_ptr() == indptr_buffer.data_ptr()
+    assert torch.equal(
+        views[-1][:6], torch.arange(1, 7, device=device, dtype=torch.int32)
     )
-
-    second_indices = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
-    second_indptr = torch.tensor([0, 2, 6], dtype=torch.int32)
-    second_view, second_indptr_view = rocm_mod._copy_ragged_to_graph_buffers(
-        second_indices,
-        second_indptr,
-        indices_buffer,
-        indptr_buffer,
-        num_rows=2,
-        max_entries_per_row=8,
-    )
-
-    expected_first_entries = (
-        first_indices.numel() if on_gfx950 else indices_buffer.numel()
-    )
-    expected_second_entries = (
-        second_indices.numel() if on_gfx950 else indices_buffer.numel()
-    )
-    assert first_view.numel() == expected_first_entries
-    assert second_view.numel() == expected_second_entries
-    assert first_view.data_ptr() == second_view.data_ptr() == indices_buffer.data_ptr()
-    assert first_indptr_view.data_ptr() == second_indptr_view.data_ptr()
-    assert torch.equal(second_view[: second_indices.numel()], second_indices)
-    assert torch.equal(second_indptr_view, second_indptr)
+    assert indptr_buffer.tolist() == [0, 3, 6]
 
 
 def test_rocm_capture_metadata_sets_adaptive_marker(monkeypatch) -> None:

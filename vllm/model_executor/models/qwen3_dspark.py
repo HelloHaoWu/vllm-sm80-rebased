@@ -54,9 +54,9 @@ logger = init_logger(__name__)
 
 
 def dspark_vocab_shard_enabled() -> bool:
-    """Whether the Markov head shards ``markov_w2`` over the TP group.
+    """Whether the Markov head shards `markov_w2` over the TP group.
 
-    Keyed on the existing ``use_local_argmax_reduction`` speculative-config
+    Keyed on the existing `use_local_argmax_reduction` speculative-config
     flag rather than a DSpark-private switch: that flag names exactly this
     trade -- vocab-parallel local argmax instead of an all-gather of full
     logits, greedy selection only -- and the weight layout has to be fixed
@@ -77,16 +77,16 @@ class DSparkMarkovHead(nn.Module):
     (`draft_vocab_size`) added to the base draft logits. The two sizes
     coincide for full-vocab drafts.
 
-    ``markov_w1`` is always replicated: it is indexed by a token id, so
-    sharding it would buy nothing. ``markov_w2`` is replicated by default for
+    `markov_w1` is always replicated: it is indexed by a token id, so
+    sharding it would buy nothing. `markov_w2` is replicated by default for
     the reason the head's original docstring gives -- it runs once per draft
     position, and sharding it would add a full-vocab gather to each. That
     argument holds for the *probabilistic* path, which needs whole processed
     logit rows to verify against, and fails for the greedy path, where the only
     thing read off the vocab axis is an argmax, and an argmax reduces. So under
-    ``use_local_argmax_reduction`` (greedy only, validated by the speculator)
-    ``markov_w2`` becomes vocab-parallel and selection goes through
-    :meth:`select_top_tokens`, which exchanges one (value, id) pair per rank
+    `use_local_argmax_reduction` (greedy only, validated by the speculator)
+    `markov_w2` becomes vocab-parallel and selection goes through
+    `select_top_tokens`, which exchanges one (value, id) pair per rank
     instead of a [B, V] row.
     """
 
@@ -205,10 +205,10 @@ class DSparkMarkovHead(nn.Module):
     ) -> torch.Tensor:
         """Greedy draft ids from base logits + this head's transition bias.
 
-        ``base_shard_logits`` is this rank's slice of the base draft logits
-        ([B, V/TP], from ``LogitsProcessor.get_shard_logits``); the argmax runs
+        `base_shard_logits` is this rank's slice of the base draft logits
+        ([B, V/TP], from `LogitsProcessor.get_shard_logits`); the argmax runs
         over the sum of the two heads, which share the shard layout because
-        both are ``ParallelLMHead``\\ s over the draft vocab. Returns draft-vocab
+        both are `ParallelLMHead`\\ s over the draft vocab. Returns draft-vocab
         ids -- the caller still applies its draft-to-target mapping.
         """
         return logits_processor.get_top_tokens(
@@ -218,9 +218,9 @@ class DSparkMarkovHead(nn.Module):
     def fusion_operands(
         self, logits_processor: LogitsProcessor
     ) -> "MarkovFusionOperands | None":
-        """Operands for the fused Markov step, or ``None`` to decline.
+        """Operands for the fused Markov step, or `None` to decline.
 
-        The fused kernel reimplements :meth:`select_top_tokens` end to end, so
+        The fused kernel reimplements `select_top_tokens` end to end, so
         it can only run where that path is exactly an unquantized GEMV plus an
         add: no soft cap, no logit scale, no separate head dtype, no quantized
         or non-row-major weight. Anything else falls back to the eager chain

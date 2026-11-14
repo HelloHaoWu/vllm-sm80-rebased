@@ -474,6 +474,8 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
                 gemm1_clamp_limit=getattr(layer, "swiglu_limit", None),
             )
         return make_wna16_moe_quant_config(
+            a1_gscale=getattr(layer, "_backport_a1_gscale", None),
+            a2_gscale=getattr(layer, "_backport_a2_gscale", None),
             w1_scale=layer.w13_weight_scale,
             w2_scale=layer.w2_weight_scale,
             group_size=self.group_size,

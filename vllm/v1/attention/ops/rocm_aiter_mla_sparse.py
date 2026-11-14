@@ -2367,15 +2367,15 @@ def _lengths_to_indptr_kernel(
 def lengths_to_indptr(
     lengths: torch.Tensor, out: torch.Tensor | None = None
 ) -> torch.Tensor:
-    """Exclusive prefix sum of ``lengths``, as an int32 ``[n + 1]`` indptr.
+    """Exclusive prefix sum of `lengths`, as an int32 `[n + 1]` indptr.
 
-    One Triton launch instead of the ``torch.zeros`` + ``torch.cumsum`` pair
+    One Triton launch instead of the `torch.zeros` + `torch.cumsum` pair
     (a fill, a cub scan-init and a cub scan kernel = 3 cudagraph nodes). The
     ragged sparse-attention metadata rebuilds this per indexer layer per step,
     so the two deleted nodes are paid 21x every decode step. Integer sums, so
     the result is bit-identical to the torch path.
 
-    ``out`` writes the result into caller-owned storage -- used to build
+    `out` writes the result into caller-owned storage -- used to build
     straight into a persistent cudagraph buffer instead of allocating and
     copying afterwards.
     """
@@ -2493,12 +2493,12 @@ def build_ragged_indices_from_dense(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Flatten dense per-row prefixes into ragged (indices, indptr).
 
-    ``indices_out`` / ``indptr_out`` are optional destinations: the kernels
+    `indices_out` / `indptr_out` are optional destinations: the kernels
     write there instead of into freshly allocated tensors, which is how the
     metadata builders fill their persistent cudagraph buffers without a
-    follow-up device-to-device copy. Only the first ``rows * max_width``
-    entries of ``indices_out`` are written; the returned view is the caller's
-    buffer unchanged, and ``indptr`` bounds every downstream read anyway.
+    follow-up device-to-device copy. Only the first `rows * max_width`
+    entries of `indices_out` are written; the returned view is the caller's
+    buffer unchanged, and `indptr` bounds every downstream read anyway.
     """
     indices = indices.reshape(indices.shape[0], -1)
     lengths = lengths.to(device=indices.device, dtype=torch.int32).reshape(-1)
@@ -2764,20 +2764,20 @@ def _sparse_attn_prefill_blocked_kernel(
 
     Those layers have no indexer: their "top-k" list is the positional identity
     prefix and a sliding window, built by
-    ``sparse_mla.py::_build_c128a_topk_metadata_kernel`` and
-    ``rocm.py::_combine_topk_swa_indices_kernel``. Both segments are therefore
+    `sparse_mla.py::_build_c128a_topk_metadata_kernel` and
+    `rocm.py::_combine_topk_swa_indices_kernel`. Both segments are therefore
     *contiguous row ranges* whose bounds are closed-form in the query position,
     so this kernel reads no index list at all -- it re-derives the same rows,
-    and the CPU test in ``test_rocm_triton_attn_dsv4.py`` pins the two
+    and the CPU test in `test_rocm_triton_attn_dsv4.py` pins the two
     derivations equal query by query.
 
-    ``BLOCK_M`` consecutive queries of one request share a CTA. Their prefixes
+    `BLOCK_M` consecutive queries of one request share a CTA. Their prefixes
     are nested (lengths differ by at most one row per 128 positions) and their
     windows slide by one row per position, so the block's row set is the last
     query's prefix plus the union of the windows, each KV row is loaded once
-    instead of ``BLOCK_M`` times, and the ``tl.dot`` runs at
-    ``M = BLOCK_M * BLOCK_H`` against Ampere's ``m16n8k16`` rather than at
-    ``BLOCK_H = 8``, which wastes half of every issue.
+    instead of `BLOCK_M` times, and the `tl.dot` runs at
+    `M = BLOCK_M * BLOCK_H` against Ampere's `m16n8k16` rather than at
+    `BLOCK_H = 8`, which wastes half of every issue.
 
     Masking is per query and only where the queries disagree: the shared body
     of both segments takes a mask-free path (the EXACT_TILE lesson -- a
@@ -4300,15 +4300,15 @@ def build_query_blocks(
     block_m: int,
     device: torch.device,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Cut a chunk's queries into ``block_m``-row blocks, none crossing a request.
+    """Cut a chunk's queries into `block_m`-row blocks, none crossing a request.
 
-    Returns ``(block_req, block_qstart)``: for each block, the chunk-local
+    Returns `(block_req, block_qstart)`: for each block, the chunk-local
     request index it belongs to and its first query row (also chunk-local).
     The last block of a request is short whenever its query count is not a
-    multiple of ``block_m``; the kernel masks those rows at the store.
+    multiple of `block_m`; the kernel masks those rows at the store.
 
     Depends only on the chunk's query layout, so one build serves all 20
-    ratio-128 layers -- ``_forward_prefill`` caches it per chunk.
+    ratio-128 layers -- `_forward_prefill` caches it per chunk.
     """
     qsl = query_start_loc.to(torch.int64).cpu()
     starts = qsl[:-1] - qsl[0]
@@ -4410,10 +4410,10 @@ def _rocm_sparse_attn_prefill_blocked_triton(
 
 
 def _prefill_blocked_num_warps(block_m: int) -> int:
-    """Warps for a ``block_m``-query tile. Measured, and not what was predicted.
+    """Warps for a `block_m`-query tile. Measured, and not what was predicted.
 
     The model this shipped with -- warps track the tile so the
-    ``[BLOCK_M*BLOCK_H, BLOCK_D]`` fp32 accumulator costs the same per thread
+    `[BLOCK_M*BLOCK_H, BLOCK_D]` fp32 accumulator costs the same per thread
     at every width -- is refuted by the sweep at M=15,360/depth 200k (us, best
     of each row in bold by inspection):
 
@@ -4439,8 +4439,8 @@ def _decode_blocked_num_warps(block_m: int) -> int:
     """Warps for the query-blocked decode tile.
 
     Same rule as the prefill twin, off the per-query kernel's 8: that kernel
-    runs 8 rather than 4 because its ``[BLOCK_H, 512]`` fp32 accumulators spill
-    ~1.7 KB/thread at 4, and the blocked accumulators are ``block_m`` times
+    runs 8 rather than 4 because its `[BLOCK_H, 512]` fp32 accumulators spill
+    ~1.7 KB/thread at 4, and the blocked accumulators are `block_m` times
     larger. Capped at 16 -- the KV tile's fp8 decode temporaries do not shrink
     with the tile, so past that the warps only split work that is already
     small.
@@ -4449,11 +4449,11 @@ def _decode_blocked_num_warps(block_m: int) -> int:
 
 
 def _query_block_size(env_value: int, default: int) -> int:
-    """Resolve a ``VLLM_SPARSE_DENSE_QUERY_BLOCK*`` setting to a tile width.
+    """Resolve a `VLLM_SPARSE_DENSE_QUERY_BLOCK*` setting to a tile width.
 
-    ``0`` disables the blocked path, ``-1`` takes ``default``, anything else is
+    `0` disables the blocked path, `-1` takes `default`, anything else is
     the forced tile. The result is rounded *up* to a power of two, which is
-    what ``tl.arange`` needs: a 6-query decode group runs on an 8-row tile with
+    what `tl.arange` needs: a 6-query decode group runs on an 8-row tile with
     its last two rows masked, rather than on two 4-row tiles that would read
     the request's rows twice.
     """
@@ -4469,7 +4469,7 @@ def _decode_maxnreg_kwargs() -> dict[str, int]:
 
     Empty dict means "leave it to Triton", which is byte-identical to not
     passing the argument at all -- the flag-off path compiles exactly as before.
-    The cached dict is only ever ``**``-unpacked, never mutated.
+    The cached dict is only ever `**`-unpacked, never mutated.
     """
     cap = envs.VLLM_SPARSE_DECODE_MAXNREG
     return {"maxnreg": cap} if cap > 0 else {}
@@ -4484,10 +4484,10 @@ def _exact_tile_enabled() -> bool:
 def _sparse_block_h(num_heads: int) -> int:
     """Head tile for the sparse prefill and split-K decode kernels.
 
-    A hardcoded 16 masks off half of every ``tl.dot`` at TP=8, where a rank
+    A hardcoded 16 masks off half of every `tl.dot` at TP=8, where a rank
     owns 8 heads. Sizing the tile to the heads that exist measures **-6.3%**
     on A100 for prefill on top of the wider KV tile (561 -> 526 us at
-    M=2048/ctx=32k); decode gains a second effect -- its ``[BLOCK_H, 512]``
+    M=2048/ctx=32k); decode gains a second effect -- its `[BLOCK_H, 512]`
     fp32 accumulators halve with the tile. Bit-identical in both kernels:
     each head's softmax reduction is independent, so repartitioning heads
     across CTAs cannot change a single output bit, which is what testing head
@@ -4533,7 +4533,7 @@ def prefill_query_block_size(num_heads: int, head_dim: int) -> int:
     # forced env value is honored verbatim -- whoever sets it owns the trade.
     if envs.VLLM_SPARSE_DENSE_QUERY_BLOCK == -1:
         smem_limit = torch.cuda.get_device_properties(
-            torch.cuda.current_device()
+            torch.accelerator.current_device_index()
         ).shared_memory_per_block_optin
         if smem_limit < 160 * 1024:
             return 0
@@ -4547,14 +4547,14 @@ def decode_block_tile(
 
     A query group's tokens sit at consecutive positions, so one CTA can serve
     the whole group off one pass over the request's rows
-    (:func:`_sparse_attn_decode_partial_blocked_kernel`). Every condition that
+    (`_sparse_attn_decode_partial_blocked_kernel`). Every condition that
     has to hold for that lives here rather than inline at the launch, so
     "which path ran" resolves to one function:
 
     * a group of one query has nothing to block;
     * the tile must be at least the group, since a group is never split across
-      CTAs -- this is what a forced ``VLLM_SPARSE_DENSE_QUERY_BLOCK_DECODE``
-      below ``next_n`` falls out of, and it declines rather than splitting;
+      CTAs -- this is what a forced `VLLM_SPARSE_DENSE_QUERY_BLOCK_DECODE`
+      below `next_n` falls out of, and it declines rather than splitting;
     * the query rows must divide into whole groups, or blocks would straddle
       requests whose rows are unrelated;
     * the head count must be a whole number of head tiles, since the kernel
@@ -4572,7 +4572,7 @@ def decode_block_tile(
     # fits A100's 163 KB but not sm86/sm89's ~99 KB. Decline rather than let
     # a forced env value hit Triton's OutOfResources at launch.
     smem_limit = torch.cuda.get_device_properties(
-        torch.cuda.current_device()
+        torch.accelerator.current_device_index()
     ).shared_memory_per_block_optin
     if block_m * 17920 > smem_limit:
         return 0
@@ -4608,7 +4608,7 @@ def decode_query_block_size(next_n: int) -> int:
     Correctness is not the reason it is off -- the blocked kernel reproduces
     the per-query kernel to 3.3e-3, which is exactly what the per-query kernel
     scores against *itself* at a different split count. The flag stays so the
-    result can be re-derived; ``VLLM_SPARSE_DENSE_QUERY_BLOCK_DECODE=6`` turns
+    result can be re-derived; `VLLM_SPARSE_DENSE_QUERY_BLOCK_DECODE=6` turns
     it on.
     """
     if next_n < 2:
@@ -4621,9 +4621,9 @@ def _use_split_k_decode() -> bool:
     """Whether decode takes the split-K path instead of the single-pass one.
 
     Split-K exists for the low-batch regime: the single-pass grid is
-    ``num_queries x heads_blocks``, so a single-query decode occupies 4 of an
+    `num_queries x heads_blocks`, so a single-query decode occupies 4 of an
     A100's 108 SMs. The split-count heuristic reads the real CU/SM count, so
-    it adapts off gfx950 even though ``mu`` was tuned there.
+    it adapts off gfx950 even though `mu` was tuned there.
     """
     if current_platform.is_cuda():
         return True
@@ -4634,7 +4634,7 @@ def _use_split_k_decode() -> bool:
 def _prefill_block_h(num_heads: int) -> int:
     """Head tile for the ragged sparse prefill kernel.
 
-    A hardcoded 16 masks off half of every ``tl.dot`` at TP=8, where a rank
+    A hardcoded 16 masks off half of every `tl.dot` at TP=8, where a rank
     owns 8 heads. Sizing the tile to the heads that exist measures **-6.3%**
     on A100 on top of the wider KV tile (561 -> 526 us at M=2048/ctx=32k) and
     is bit-identical -- each head's softmax reduction is independent, so
@@ -4651,13 +4651,13 @@ def _prefill_block_h(num_heads: int) -> int:
 def _decode_block_h(num_heads: int) -> int:
     """Head tile for the split-K sparse decode kernel.
 
-    Same rule and same reason as ``_prefill_block_h``: a hardcoded 16 masks off
-    half of every ``tl.dot`` at TP=8, where a rank owns 8 heads. Decode gains a
-    second effect prefill does not -- the ``[BLOCK_H, 512]`` fp32 accumulators
+    Same rule and same reason as `_prefill_block_h`: a hardcoded 16 masks off
+    half of every `tl.dot` at TP=8, where a rank owns 8 heads. Decode gains a
+    second effect prefill does not -- the `[BLOCK_H, 512]` fp32 accumulators
     halve with the tile, and those accumulators are what the launch site cites
     for needing 8 warps.
 
-    Bit-identical by the same argument ``_prefill_block_h`` makes: each head's
+    Bit-identical by the same argument `_prefill_block_h` makes: each head's
     softmax reduction is independent, so repartitioning heads across CTAs
     cannot change a single output bit.
     """
@@ -4668,8 +4668,8 @@ def _decode_block_h(num_heads: int) -> int:
 def _prefill_block_k(head_dim: int) -> int:
     """KV tile width for the ragged sparse prefill kernel.
 
-    At ``head_dim >= 256`` the ``[BLOCK_H, BLOCK_D] x [BLOCK_D, BLOCK_K]`` dot
-    is latency-bound at ``BLOCK_K=16``: doubling the tile halves the loop trip
+    At `head_dim >= 256` the `[BLOCK_H, BLOCK_D] x [BLOCK_D, BLOCK_K]` dot
+    is latency-bound at `BLOCK_K=16`: doubling the tile halves the loop trip
     count and measured **-17% to -23% at every prefill shape** on A100
     (M=2048/ctx=32k: 721 -> 561 us; M=512/ctx=8k: 208 -> 161 us), with
     BLOCK_K=64 worse than either. It costs one CTA/SM -- 3 -> 2, occupancy
@@ -4678,7 +4678,7 @@ def _prefill_block_k(head_dim: int) -> int:
 
     The cost is smem: 49,664 B/CTA at 16 against 82,944 B at 32. That fits
     A100's 164 KB/SM but not AMD's 64 KB LDS per workgroup, which is what the
-    plain ``head_dim >= 256`` rule was protecting. So the tile widens only
+    plain `head_dim >= 256` rule was protecting. So the tile widens only
     where the device reports room for it, and every other device keeps 16.
     """
     if head_dim < 256:
@@ -5713,7 +5713,7 @@ def rocm_sparse_attn_prefill_blocked(
 ) -> None:
     """Query-blocked prefill for the layers whose index list is positional.
 
-    Same contract as :func:`rocm_sparse_attn_prefill` minus the index list:
+    Same contract as `rocm_sparse_attn_prefill` minus the index list:
     this path re-derives the rows from the query positions, so the caller does
     not build (or allocate) the dense combined indices at all.
     """

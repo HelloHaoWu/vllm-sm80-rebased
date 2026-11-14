@@ -17,6 +17,7 @@ at ~296 ms on this hardware; §3 below carries the per-component basis.
 ## 1. Refuted optimizations
 
 ### Compilation / graphs
+
 - **Enabling torch.compile/inductor** (`VLLM_USE_BREAKABLE_CUDAGRAPH=0`):
   decode step +0.32 ms (5.1σ), TTFT null. The hot path is custom C/tilelang
   ops inductor cannot fuse across, and ~93% of decode kernels are already
@@ -25,6 +26,7 @@ at ~296 ms on this hardware; §3 below carries the per-component basis.
   The auto-enabled default (compile mode NONE) is correct for this model.
 
 ### Parallelism / communication
+
 - **Expert-parallel MoE** (`--enable-expert-parallel`): TTFT +50.8 ms (72σ),
   step +0.54 ms (27σ). The all2all dispatch+combine costs more than the
   better GEMM shapes save, on both phases. EP engaged correctly (32/256
@@ -59,6 +61,7 @@ at ~296 ms on this hardware; §3 below carries the per-component basis.
   deliberately declined: silent cross-rank corruption failure mode.
 
 ### Marlin (weight-only dequant GEMM)
+
 - **Giving dense Marlin more CTAs/SM — refuted from both directions, with the
   tile held bit-identical in one of them.** Both flags kept default-off as the
   record.
@@ -209,6 +212,7 @@ at ~296 ms on this hardware; §3 below carries the per-component basis.
   digits at any sane tile. Design effort belongs in the mainloop.
 
 ### Small-kernel / launch-count work (decode)
+
 - **Fused single-launch `moe_align_block_size`**: 2.2× slower at the real
   36-pair workload. The existing `num_experts<=64` fused CUDA path is
   itself 1.3–2.1× slower than the 2-launch fallback — the gate fences off a
@@ -228,6 +232,7 @@ at ~296 ms on this hardware; §3 below carries the per-component basis.
   slower than the cross-lane shuffle reduce).
 
 ### Sparse attention / indexer
+
 - **fp8-direct KV read in the sparse prefill kernel**: 6.8× WORSE,
   bit-identical output. SM80 has no fp8 convert; the 256-entry LUT turns
   vector loads into 16k gathers, 188→255 regs with spill.
@@ -249,6 +254,7 @@ at ~296 ms on this hardware; §3 below carries the per-component basis.
   loads/accumulators.
 
 ### DSpark / sampling
+
 - **`VLLM_DSPARK_VOCAB_SHARD` env flag**: dead — zero consumers; its module
   is absent from the tree. The real switch is
   `speculative_config.use_local_argmax_reduction` (adopted: −0.455 ms/step,
@@ -371,7 +377,7 @@ at ~296 ms on this hardware; §3 below carries the per-component basis.
 
 ## 4. Rules added in the structural round (v7–v10)
 
-14. **Price a sharding change by the layer's output-bytes-to-FLOPs ratio, not
+ 1. **Price a sharding change by the layer's output-bytes-to-FLOPs ratio, not
     its redundant FLOPs.** Removing 7/8 of replicated work only pays if the
     all-gather that replaces it is small relative to the GEMM it accelerates.
     Indexer top-k indices: tiny output, huge win (−39 ms). fused_wqa_wkv: 24
@@ -379,35 +385,35 @@ at ~296 ms on this hardware; §3 below carries the per-component basis.
     168 µs all-gather at any M. Corollary: the same technique has opposite
     economics at different operating points — decode partials that cost 98 KB
     cost 134 MB at prefill T.
-15. **When a FLOP/byte count won't reconcile, check the label before
+ 2. **When a FLOP/byte count won't reconcile, check the label before
     re-deriving the arithmetic.** Twice in one day a "wrong number" was a
     right number attached to the wrong operator name (ROOFLINE's "mHC prenorm"
     was the compressor's fused_wkv_wgate; the real prenorm GEMM is 8× smaller
     by FLOPs and 24× bigger by achievable ms because it is bandwidth-bound).
-16. **After two refuted hypotheses on one kernel, fund an instrument, not a
+ 3. **After two refuted hypotheses on one kernel, fund an instrument, not a
     third hypothesis — and treat the instrument's diagnosis as a hypothesis
     too.** ncu correctly identified a 3.4× smem over-request pinning 1 CTA/SM;
     right-sizing it made the kernel 44% SLOWER (block count IS split-K depth
     in Marlin's work distribution). A profiler names the binding constraint on
     a resource; it cannot tell you that relaxing it helps.
-17. **A one-line source diff is not a one-mechanism diff.** A single changed
+ 4. **A one-line source diff is not a one-mechanism diff.** A single changed
     address computation swung register allocation by 54 regs and flipped the
     sign of the measured effect between two otherwise-identical experiments.
     Attribute with a one-switch-per-rung ladder, each rung measured in the
     same invocation, before naming a mechanism.
-18. **Issue count is a roofline term the roofline doesn't have.** The
+ 5. **Issue count is a roofline term the roofline doesn't have.** The
     sparse-prefill gather is issue-bound: constant-true tile masks cost 9.4%
     of the kernel while appearing in no FLOP or byte account
     (VLLM_SPARSE_PREFILL_EXACT_TILE, adopted, bit-identical). When a kernel is
     at neither the compute nor the bandwidth ceiling, audit what it *issues*.
-19. **Two sharding features over one tensor must not assume each other's
+ 6. **Two sharding features over one tensor must not assume each other's
     partition.** VLLM_UNREPLICATE_ATTN_GEMMS uses an even split; the indexer
     query shard uses an uneven no-padding split. They agree only when
     n % tp == 0. The gather between them is what keeps them composable;
     "skip the gather and consume the shard directly" produces wrong top-k
     indices with no crash, on ragged batches only. Unify the partitions first
     or keep the gather.
-20. **Report "condition met" by pointing at the line that implements it, not
+ 7. **Report "condition met" by pointing at the line that implements it, not
     at the evidence artifact for it.** A fully-documented threshold table
     shipped with the threshold never wired; the reporting standard caught it
     only when a log line failed to resolve the constant's name.
@@ -436,59 +442,59 @@ at ~296 ms on this hardware; §3 below carries the per-component basis.
 
 ## 6. Rules earned in the final round
 
-21. **Ask what the implementation adds that the idea doesn't mention.** The
+ 1. **Ask what the implementation adds that the idea doesn't mention.** The
     priced quantity was real three times (redundant FLOPs, payload bytes,
     saved launches) while the governing cost was elsewhere (the collective,
     the accumulator precision, the concat copies). Price the delta the code
     introduces, not the quantity the idea is about.
-22. **A figure is true at one operating point of one implementation.** A
+ 2. **A figure is true at one operating point of one implementation.** A
     6 µs custom-AR fixed cost was carried onto an NCCL all_gatherv (~40–64 µs
     measured); a prefill roofline was carried onto decode shapes; a decode
     partial-buffer cost was carried onto prefill T. Check the primary
     artifact at the actual operating point — and note the rendered summary
     table is exactly where a row goes missing (the 0.5 MiB AG point existed
     in the raw JSON but not the doc table).
-23. **State findings absolutely or control both variables.** "Idle grew"
+ 3. **State findings absolutely or control both variables.** "Idle grew"
     compared mismatched profiler settings; the correction "idle is flat"
     compared mismatched configs. A corrected measurement does not license an
     uncontrolled comparison. Profile with the same profiler flags as the
     baseline (with_stack changes eager-gap numbers materially), and join GPU
     events to launches via BOTH cuda_runtime and cuda_driver or ~half the
     correlations silently land in the wrong bucket.
-24. **An attribution is not a duration.** "9 memcpys at 213 µs" was 213 µs
+ 4. **An attribution is not a duration.** "9 memcpys at 213 µs" was 213 µs
     of idle *attributed to* 1–5 µs copies at the end of a host-busy window.
     Read the event's own duration before chasing it.
-25. **A flag that touches distributed state must stay inert single-process**
+ 5. **A flag that touches distributed state must stay inert single-process**
     (guard on model_parallel_is_initialized() before get_tp_group()), and
     must be tested with the flag ON as well as off — the kernel suites run
     single-process and will pass with a flag that crashes serving.
-26. **Enforce couplings in code, not in serve.sh comments.** The prenorm
+ 6. **Enforce couplings in code, not in serve.sh comments.** The prenorm
     shard is gated on `sqrsum is None` — the fold's own signal — so the
     two-gather degenerate config is unrepresentable rather than documented.
-27. **Monkeypatching `...kernels.mhc.triton.<name>` targets site-packages
+ 7. **Monkeypatching `...kernels.mhc.triton.<name>` targets site-packages
     triton**: the package's `from .triton import *` rebinds the name. Use
     importlib.import_module on the full path.
-28. **Never benchmark a hardware *capability* through an untuned reference
+ 8. **Never benchmark a hardware *capability* through an untuned reference
     implementation.** `torch._int_mm` measures 58 TOP/s on A100 — under 10% of
     the 624 TOP/s int8 peak, and 3.5x *slower* than bf16 at the MoE expert
     shapes. Taken at face value it says "int8 is slower here", which is the
     opposite of the truth: vLLM's own CUTLASS int8 path is 6x faster on the
     identical shape and reaches 58% of peak. The reference told us about
     itself, not about the machine.
-29. **Always name the denominator.** A cost is only large or small relative to
+ 9. **Always name the denominator.** A cost is only large or small relative to
     the alternative it buys. The int8 weight format costs +111 us inside
     Marlin's mainloop, which reads as a blocker until set against the 1035 us
     the mainloop itself is worth — 11%, not a blocker. Reporting the numerator
     alone nearly closed a live ~40 ms route (#33). Same failure family as
     rule 14: price what the change *adds*, against what it *buys*.
-30. **The MoE's cost is a shape problem wearing a format problem's clothes.**
+10. **The MoE's cost is a shape problem wearing a format problem's clothes.**
     mxfp4, int8, u8b128 and bf16 all behave well on the aggregate expert shape
     and all degrade on 192-row experts; only the amount differs. Every
     format-swap route in this document failed at the grouped structure, not
     at the numeric format — which is why the one route that survived (#38)
     changes the *kernel's handling of the grouping*, not the encoding.
 
-31. **A cross-invocation delta under ~20% is not a result until repeated —
+11. **A cross-invocation delta under ~20% is not a result until repeated —
     and a plausible mechanism makes a cold-baseline artifact MORE convincing,
     not less.** This bench drifts ~17% run-to-run on idle GPUs (absolute
     numbers move; ratios within one invocation hold to 3%). The
@@ -503,7 +509,7 @@ at ~296 ms on this hardware; §3 below carries the per-component basis.
     mechanism claims in §1. **Put both arms in one invocation where possible,
     and repeat anything that crosses a decision boundary.**
 
-32. **Pre-registered bands must not conclude a capability limit from an
+12. **Pre-registered bands must not conclude a capability limit from an
     untuned reference implementation — that is rule 28 applied to your own
     gate.** The #41 audit registered "if the from-scratch spike measures
     ≤600 GB/s, the wall is not the dequant" — inside the very document whose
@@ -516,7 +522,7 @@ at ~296 ms on this hardware; §3 below carries the per-component basis.
     good the kernel is. *Check that your gate varies the term it claims to
     measure, and that the instrument is strong enough to carry the conclusion.*
 
-28. **Validate numerics properties on captured real tensors; when that is
+13. **Validate numerics properties on captured real tensors; when that is
     impossible, construct inputs with the real spread.** A distribution that
     makes the property trivially true makes the test unable to fail. Three
     instances in two days, all the same shape: the int8/e4m3 format decision
@@ -603,19 +609,19 @@ adopted-or-record commits after `4adc46ce38`.
   spill) and stays behind VLLM_AR_INT8_ABSOLUTE_ORDER, default off, as the
   only order-stable implementation should shard boundaries ever change.
 
-31. **A cross-invocation delta under ~20% is not a result until repeated —
+ 1. **A cross-invocation delta under ~20% is not a result until repeated —
     and a plausible mechanism makes a cold-baseline artifact MORE
     convincing, not less.** A fake 1.2× on three shapes arrived with a
     ready explanation; the repeat showed 1.00× on all three.
-32. **Pre-registered bands must not conclude a capability limit from an
+ 2. **Pre-registered bands must not conclude a capability limit from an
     untuned reference, and must vary the term they claim to measure.**
     Caught inside the audit whose premise was the same rule.
-33. **Compute the ideal-case prize before pricing the mechanism.** The
+ 3. **Compute the ideal-case prize before pricing the mechanism.** The
     cheapest possible test — one line of arithmetic on the pool times the
     fraction actually takeable — and the one most often skipped on the item
     its author expects to survive. Apply it symmetrically: the half you
     expect to die AND the half you expect to live.
-34. **Validate numerics properties on captured real tensors; when
+ 4. **Validate numerics properties on captured real tensors; when
     impossible, construct inputs with the real spread.** A distribution
     that makes the property trivially true makes the test unable to fail
     (three instances: the format table, order stability, and a verification
@@ -650,7 +656,7 @@ is at this shape. Config-knob battery same round: prefix-caching OFF is
 blocks even at 0%% hits), max-num-seqs 8 is +2.89 worse, block-size 256
 null — v12's serving config is measured optimal.
 
-35. **When a profiler rule quotes a ratio, find the counter that would have
+ 1. **When a profiler rule quotes a ratio, find the counter that would have
     to be nonzero for the rule to be true.** Est. Speedup is a heuristic
     over aggregate ratios; the per-instruction `excessive` counters are the
     ground truth, and checking them removed a 33.8% headline plus an
@@ -742,7 +748,7 @@ Nothing here changes gated behavior; every touched suite re-run green.
 - **d2t rides in MarkovFusionOperands** instead of being getattr'd off the
   model — the offset-form assumption is now part of the hook contract.
 - **mhc_post_tilelang grew x_scales=None** and dispatches internally
-  (same contract as mhc_fused_post_pre); model.py's _mhc_post_any deleted.
+  (same contract as mhc_fused_post_pre); model.py's_mhc_post_any deleted.
   The fused function's raw-kernel imports are all `_tk.`-qualified so they
   can never shadow this module's same-named wrappers again.
 - Reuse: benchmark's Marlin block_m ladder now imports
@@ -830,6 +836,7 @@ instruments agreed 0.6%) and c(d) = 53.9 + 0.156*d_ktokens us/token.
 zero batching. Spec-K reduction is impossible (dspark_block_size=5 floor).
 
 ADOPTED (256k config, serve_256k.sh):
+
 - DEQUANT_BF16 at 256k (arm N1): uniform ~6% on TTFT/TPOT/ITL/tput at c64;
   its capacity cost is one resident of ~27. The original reason to disable
   it at long context was the planning-bound misread.
@@ -882,6 +889,7 @@ the round's start; per-pool ideal floor ~19.9k tok/s ingest. Rounds 1-2
 kernel figures were re-anchored after a config parity failure (rule 43).
 
 ADOPTED (all default-on, =0 opt-outs):
+
 - **K2-prefill, query-blocked dense-causal kernel for the 20 ratio-128
   layers** (VLLM_SPARSE_DENSE_QUERY_BLOCK, BLOCK_M=8, warps measured
   4/4/8/8): the layers have NO indexer and positional identity-prefix
@@ -948,18 +956,18 @@ BN=256 and warps=8 both worse (7th occupancy confirmation). mHC "pool
 halving" RETRACTED: _PRENORM_SMALL_T=32 route switch at C=5.33 migrates
 the work to cuBLAS (kernel SET changed, not cost). Decode slope unchanged
 by round 3 (2.12 ms/req; K1 is 68% of the small delta); owner is ONE
-kernel, _sparse_attn_decode_partial_kernel, 1.083 ms/req = 53.7% of the
+kernel,_sparse_attn_decode_partial_kernel, 1.083 ms/req = 53.7% of the
 slope — mechanism search open. mnbt=32768 arm: NULL throughput/TTFT,
 mean TPOT/ITL gains were residency redistribution (rule 39) — not
 adopted, documented as a knob. Deadlock scope WIDENED: also hit at 200k
 ctx / C=4 / serial admission after a profiled prefill in the same server
 session — do not mix prefill profiling and decode ramps in one session.
 
-53. Diff kernel SETS before pricing a component slope: a kernel whose
+ 1. Diff kernel SETS before pricing a component slope: a kernel whose
     call count changes across operating points has changed ROUTE, not
     cost (the mHC "anomaly").
-54. Check which directions a tuning comment actually swept before
+ 2. Check which directions a tuning comment actually swept before
     trusting its optimum (BLOCK_N=128 had only ever been swept down).
-55. Measure a kernel's ceiling with the rest of the kernel switched off
+ 3. Measure a kernel's ceiling with the rest of the kernel switched off
     before attributing a gap to interaction (the epilogue-stripped run
     refuted "overlap failure").
