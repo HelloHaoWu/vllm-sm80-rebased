@@ -176,11 +176,10 @@ def _backport_mhc_fused_post_pre_tilelang(
 
     """
     from vllm.model_executor.kernels.mhc.tilelang_kernels import (
+        _MHC_PRE_BIG_FUSE_TILELANG_KERNEL,
         compute_num_split,
         mhc_fused_tilelang,
         mhc_post_tilelang,
-        mhc_pre_big_fuse_tilelang,
-        mhc_pre_big_fuse_with_norm_tilelang,
     )
     from vllm.utils.math_utils import cdiv
 
@@ -347,46 +346,23 @@ def _backport_mhc_fused_post_pre_tilelang(
                 sqrsum_ready=fuse_sqrsum,
             )
 
-    if norm_weight is None:
-        mhc_pre_big_fuse_tilelang(
-            gemm_out_mul,
-            gemm_out_sqrsum,
-            hc_scale,
-            hc_base,
-            residual_cur,
-            post_mix_cur,
-            comb_mix_cur,
-            layer_input_cur,
-            hidden_size,
-            rms_eps,
-            hc_pre_eps,
-            hc_sinkhorn_eps,
-            hc_post_mult_value,
-            sinkhorn_repeat,
-            n_splits,
-            hc_mult,
-        )
-    else:
-        mhc_pre_big_fuse_with_norm_tilelang(
-            gemm_out_mul,
-            gemm_out_sqrsum,
-            hc_scale,
-            hc_base,
-            residual_cur,
-            post_mix_cur,
-            comb_mix_cur,
-            layer_input_cur,
-            norm_weight,
-            hidden_size,
-            rms_eps,
-            hc_pre_eps,
-            hc_sinkhorn_eps,
-            hc_post_mult_value,
-            sinkhorn_repeat,
-            norm_eps,
-            n_splits,
-            hc_mult,
-        )
+    _MHC_PRE_BIG_FUSE_TILELANG_KERNEL(
+        gemm_out_mul,
+        gemm_out_sqrsum,
+        hc_scale,
+        hc_base,
+        residual_cur,
+        post_mix_cur,
+        comb_mix_cur,
+        layer_input_cur,
+        rms_eps,
+        hc_pre_eps,
+        hc_sinkhorn_eps,
+        hc_post_mult_value,
+        sinkhorn_repeat,
+        norm_weight=norm_weight,
+        norm_eps=norm_eps,
+    )
 
     return (
         residual_cur.view(*outer_shape, hc_mult, hidden_size),
