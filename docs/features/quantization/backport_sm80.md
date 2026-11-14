@@ -20,6 +20,19 @@ CUDA graph replay. Eager calls log device, dtype and resolved backend. The
 Backport path preserves deterministic tie selection and output order; upstream
 paths retain their own semantics.
 
+## Legacy Marlin W4A8
+
+The fork's optional `VLLM_MARLIN_INPUT_DTYPE=int8` activation quantization
+uses isolated legacy dense and MoE kernels in `_backport_C`. Leaving the
+variable unset keeps current upstream W4A16. INT8 activations on SM80 are
+separate from the software FP8 indexer-cache encoding and do not enable
+native FP8 arithmetic on A100/A800.
+
+The inherited `fp8` activation option remains restricted to SM89/SM12x.
+NVFP4 with A8 remains unsupported, as in the fork. The two kernel families
+have separate symbols, schemas and weight-repacking entry points; do not
+reuse weights packed for one activation layout in the other.
+
 ## Defaults and compatibility limits
 
 PLE/Engram defaults to CPU offload as in current upstream. Explicit

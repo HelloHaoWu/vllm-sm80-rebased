@@ -7,6 +7,7 @@ Quantization trades off model precision for smaller memory footprint, allowing l
 
 The following are the supported quantization formats for vLLM:
 
+- [Backport SM80 and legacy Marlin compatibility](backport_sm80.md)
 - [AutoAWQ](auto_awq.md)
 - [BitsAndBytes](bnb.md)
 - [GPTQModel](gptqmodel.md)
