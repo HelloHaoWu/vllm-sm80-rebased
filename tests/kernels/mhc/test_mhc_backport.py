@@ -388,7 +388,8 @@ def test_mhc_post_tilelang(num_tokens, hidden_size, hc_mult):
 @pytest.mark.parametrize("num_tokens", [1, 4, 8, 128])
 @pytest.mark.parametrize("hidden_size", [4096, 7168])
 @pytest.mark.parametrize("hc_mult", [4])
-def test_mhc_fused_post_pre(num_tokens, hidden_size, hc_mult):
+@pytest.mark.parametrize("fuse_norm", [False, True])
+def test_mhc_fused_post_pre(num_tokens, hidden_size, hc_mult, fuse_norm):
     torch.set_default_device(DEVICE)
     set_random_seed(0)
 
@@ -411,6 +412,9 @@ def test_mhc_fused_post_pre(num_tokens, hidden_size, hc_mult):
     sinkhorn_repeat = 20
     hc_post_alpha = 1.0
 
+    norm_weight = torch.randn(hidden_size, dtype=torch.bfloat16) if fuse_norm else None
+    norm_eps = 1e-6
+
     def run_ref():
         residual_ref = mhc_post_ref(x, residual, post_layer_mix, comb_res_mix)
         post_mix_ref, res_mix_ref, layer_input_ref = mhc_pre_ref(
@@ -424,6 +428,10 @@ def test_mhc_fused_post_pre(num_tokens, hidden_size, hc_mult):
             hc_post_alpha,
             sinkhorn_repeat,
         )
+        if norm_weight is not None:
+            layer_input_ref = F.rms_norm(
+                layer_input_ref.float(), (hidden_size,), norm_weight.float(), norm_eps
+            ).to(torch.bfloat16)
         return residual_ref, post_mix_ref, res_mix_ref, layer_input_ref
 
     residual_ref, post_mix_ref, res_mix_ref, layer_input_ref = run_ref()
@@ -441,6 +449,8 @@ def test_mhc_fused_post_pre(num_tokens, hidden_size, hc_mult):
         hc_sinkhorn_eps,
         hc_post_alpha,
         sinkhorn_repeat,
+        norm_weight=norm_weight,
+        norm_eps=norm_eps,
     )
 
     torch.testing.assert_close(residual, residual_ref, atol=1e-2, rtol=1e-2)

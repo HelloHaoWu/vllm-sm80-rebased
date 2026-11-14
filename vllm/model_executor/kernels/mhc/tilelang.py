@@ -408,8 +408,12 @@ def _hc_prenorm_gemm_outputs(
     )
     if use_deep_gemm:
         tf32_hc_prenorm_gemm(x, fn, out, sqrsum, n_splits)
-    else:
+    elif use_tilelang_fallback:
         _tilelang_hc_prenorm_gemm(x, fn, out, sqrsum, hidden_size, hc_mult)
+    else:
+        # Broadcast inputs have H columns, not hc_mult * H as required by
+        # the specialized TileLang GEMM. Keep their FP32 projection on SM80.
+        _torch_hc_prenorm_gemm(x, fn, out, sqrsum)
     return out, sqrsum
 
 
