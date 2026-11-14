@@ -2694,7 +2694,12 @@ class TestThinkingConfigMapping:
     """
 
     def _kwargs(self, **request_kwargs):
-        req = _make_request([{"role": "user", "content": "hi"}], **request_kwargs)
+        req = AnthropicMessagesRequest(
+            model="test-model",
+            max_tokens=8192,
+            messages=[{"role": "user", "content": "hi"}],
+            **request_kwargs,
+        )
         chat_req = AnthropicServingMessages._build_base_request(
             req, [{"role": "user", "content": "hi"}]
         )
