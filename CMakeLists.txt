@@ -690,7 +690,9 @@ if(VLLM_GPU_LANG STREQUAL "CUDA" OR VLLM_GPU_LANG STREQUAL "HIP")
         "csrc/backport/marlin_bindings.cpp")
       list(APPEND VLLM_STABLE_EXT_SRC ${BACKPORT_MARLIN_SRC})
       if (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8)
-        set_source_files_properties(${BACKPORT_MARLIN_SRC}
+        set(BACKPORT_MARLIN_CUDA_SRC ${BACKPORT_MARLIN_SRC})
+        list(FILTER BACKPORT_MARLIN_CUDA_SRC INCLUDE REGEX "\\.cu$")
+        set_source_files_properties(${BACKPORT_MARLIN_CUDA_SRC}
           PROPERTIES COMPILE_FLAGS "-static-global-template-stub=false")
       endif()
       set(BACKPORT_MARLIN_GENERIC_SRC ${BACKPORT_MARLIN_SRC})
