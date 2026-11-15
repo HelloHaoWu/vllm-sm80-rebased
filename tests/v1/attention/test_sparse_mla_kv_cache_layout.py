@@ -28,6 +28,64 @@ from vllm.v1.worker.utils import allocate_kv_cache, customize_layer_config
 pytestmark = pytest.mark.skip_global_cleanup
 
 
+@pytest.mark.skipif(not current_platform.is_cuda(), reason="CUDA sparse MLA")
+@pytest.mark.parametrize("buffer_width", [2048, 2176])
+@pytest.mark.parametrize("use_graph", [False, True])
+def test_triton_sparse_mla_preserves_kpool_tail(buffer_width, use_graph):
+    from vllm.config import VllmConfig, set_current_vllm_config
+    from vllm.v1.attention.backends.mla.triton_mla_sparse import TritonMLASparseImpl
+    from vllm.v1.attention.backends.mla.xpu_mla_sparse import XPUMLASparseMetadata
+
+    device = "cuda"
+    indices = torch.full((1, buffer_width), -1, dtype=torch.int32, device=device)
+    indices[0, 0] = 0
+    indices[0, 2048 if buffer_width > 2048 else 1] = 2048
+    cache = torch.zeros((17, 128, 512), dtype=torch.bfloat16, device=device)
+    cache[1, 0].fill_(2)
+    blocks = torch.arange(17, dtype=torch.int32, device=device).unsqueeze(0)
+    blocks[0, 0] = 2
+    blocks[0, 16] = 1
+    q = torch.zeros((1, 4, 512), dtype=torch.bfloat16, device=device)
+    metadata = XPUMLASparseMetadata(
+        num_reqs=1,
+        max_query_len=1,
+        max_seq_len=2049,
+        num_actual_tokens=1,
+        query_start_loc=torch.tensor([0, 1], dtype=torch.int32, device=device),
+        slot_mapping=torch.zeros(1, dtype=torch.int64, device=device),
+        block_table=blocks,
+        req_id_per_token=torch.zeros(1, dtype=torch.int32, device=device),
+        block_size=128,
+        topk_tokens=2048,
+        num_decodes=1,
+        num_decode_tokens=1,
+    )
+    with set_current_vllm_config(VllmConfig()):
+        impl = TritonMLASparseImpl(
+            num_heads=4,
+            head_size=512,
+            scale=512**-0.5,
+            num_kv_heads=1,
+            alibi_slopes=None,
+            sliding_window=None,
+            kv_cache_dtype="bfloat16",
+            logits_soft_cap=None,
+            attn_type="decoder",
+            kv_sharing_target_layer_name=None,
+            topk_indices_buffer=indices,
+            kv_lora_rank=512,
+        )
+        result, _ = impl.forward_mqa(q, cache, metadata, None)
+        torch.testing.assert_close(result, torch.ones_like(q), rtol=0, atol=0)
+        if use_graph:
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                result, _ = impl.forward_mqa(q, cache, metadata, None)
+            cache[1, 0].fill_(4)
+            graph.replay()
+            torch.testing.assert_close(result, torch.full_like(q, 2), rtol=0, atol=0)
+
+
 @pytest.mark.parametrize(
     "device",
     [
