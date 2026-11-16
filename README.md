@@ -38,6 +38,15 @@ The tested GLM model still uses the same W4A16 checkpoint and BF16 attention KV.
 A800 does not gain native FP8 Tensor Core computation through software FP8 cache
 encoding. Source migration coverage is broader than service-validation coverage.
 
+## Historical KPool cache corruption
+
+The old deployment baseline contained an NVIDIA KPool prefill addressing defect:
+tail blocks were written with a dense stride despite a padded runtime layout,
+potentially corrupting sparse-indexer keys/scales and Top-K selection. The fix
+comes from vLLM PR #57477 and is inherited by this branch. It is separate from
+the later 2048/2176 index-buffer-width integration repair. See the
+[issue explanation, upstream attribution, and current status](docs/backport_rebase/kpool_cache_corruption.md).
+
 ## Validation snapshot
 
 Matched four-A800 comparisons with 512-token output and 1K/8K/32K input tiers

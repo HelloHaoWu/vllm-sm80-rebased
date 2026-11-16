@@ -73,8 +73,12 @@ Two issues appeared during full builds and real-model warmup:
    the actual buffer width, retaining tail entries and invalid -1 padding. The
    selection budget and selection algorithm are unchanged.
 
-The latter is separate from the earlier Backport KPool addressing/stride/RING
-repair already present in the old baseline. See the regression test above.
+The latter is separate from the historical KPool tail-addressing defect repaired
+by upstream vLLM PR #57477, already patched in the old deployment used for the
+performance comparison. Later upstream tail-ring changes are additional layout
+evolution, not the same repair. See the
+[KPool issue explanation and attribution](kpool_cache_corruption.md) and the
+regression test above.
 
 The integration follows current upstream's strict Anthropic thinking validation
 and CPU-offload defaults for PLE/Engram, while retaining documented explicit

@@ -28,6 +28,12 @@
 
 配置细节见 [SM80 与旧 Marlin 兼容说明](docs/features/quantization/backport_sm80.md)。
 
+## 旧部署中的 KPool 缓存问题
+
+早期基线中的 NVIDIA prefill 内核没有按真实块间距写入 KPool 尾部缓存，可能覆盖 DSA 索引缓存，造成 Top-K 选错上下文。寻址修复来自 vLLM 上游 PR #57477，本分支已继承。它与 rebase 后“实际缓冲区 2176 列、调用仍传 2048”的集成问题不同；两项修复都已包含，不能据此宣称全部评测低分已解决。
+
+具体机制、地址示例、修复来源和验证边界见 [KPool 缓存问题说明](docs/backport_rebase/kpool_cache_corruption.md)。
+
 ## 验证与性能
 
 在同一组四张 A800、同一份 GLM-5.3-Flash AWQ W4A16 权重和相同配置下，与原 Backport 部署比较：关闭 MTP 时总输出吞吐净提升约 1.43%～4.58%；双方均开启单 token MTP 时约提升 1.66%～5.49%。这是整套部署栈的变化，包含 Torch/Triton 等依赖变化，不能单独归因于某个算子或 Git 操作。
