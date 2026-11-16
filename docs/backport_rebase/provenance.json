@@ -1,0 +1,31 @@
+{
+  "format_version": 1,
+  "publication_date": "2026-11-17",
+  "upstream": {
+    "repository": "https://github.com/vllm-project/vllm",
+    "commit": "cfd86e43206515956029d5e5cd25ac7bb212da2c"
+  },
+  "backport": {
+    "repository": "https://github.com/wtdcode/vllm-backport",
+    "commit": "29e66dad461b11caae6039f510eaa7913f9dfb19"
+  },
+  "validated_integration_source": "88a7d60756d5d922f8771f6df32032210b877301",
+  "public_sanitized_base": "74bcb2f2ffe7a04ef691570b6a71ae294c0d6331",
+  "publication_history_policy": "Private ChangeLogs and local trial README removed from migration history; upstream/fork authorship retained; publication docs only added afterwards.",
+  "git_object_ids": {
+    "vllm": "9fa7e9ecc6955c61d4fb839721d3aa133f519ba5",
+    "csrc": "10d7d8427683f97b7e76ded74b744a9b9e231cd7",
+    "cmake": "4f1781505ae6bded849c4da4ea17e9e8bcee5e6e",
+    "rust": "9cd5f97f902784da0113b0325d78e79fee09b162",
+    "requirements": "3d4ec172d338a4b98489b16c11689fcdc9ec9bf1",
+    "docker": "e53bdf994fc8f7edfddaeba312331056b5037b4c",
+    "tests": "57794b9f958d82ec093e6f985185bab07c1d355c",
+    "benchmarks": "d813cea7035324bbcb707fd8649b417f9f32534d",
+    "setup.py": "6cdbee587f791fffb6c7ac549e6e000446865a38",
+    "CMakeLists.txt": "aad4dc74a8f7f552275a747a7e22f6bf07c1c7a7",
+    "pyproject.toml": "d4fb41e20aed87187ea7d8f14b736ab6124fd311",
+    "LICENSE": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64"
+  },
+  "public_binary_artifacts": false,
+  "public_commit_gpu_revalidation": false
+}
