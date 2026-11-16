@@ -1,4 +1,4 @@
-# Public source publication preparation
+# Public source publication
 
 Date: 2026-11-17, Asia/Shanghai.
 
@@ -34,3 +34,9 @@ See [acknowledgements](../ACKNOWLEDGEMENTS.md),
 [architecture](../docs/backport_rebase/architecture.md),
 [validation](../docs/backport_rebase/validation.md), and
 [provenance](../docs/backport_rebase/provenance.json).
+
+## Published repository
+
+Published publicly as [HelloHaoWu/vllm-sm80-rebased](https://github.com/HelloHaoWu/vllm-sm80-rebased), a GitHub fork of wtdcode/vllm-backport, with main as the default branch. The initial publication commit is 5e7a9b48c356ff75ba10309b3ff048112a67cf79. Actions were disabled in this new repository before the source push.
+
+GitHub readback confirmed all 12 runtime/build/test/license object identities against the validated source, and confirmed that the acknowledgements file matched the local publication. No wheel or container image was published, and no running model service was changed.
